@@ -199,23 +199,11 @@ int stored_packet_desc(fap_packet_t *fap, int index,
 	return 0;
 }
 
-int store_packet(struct state *state, fap_packet_t *fap)
+int update_packets_ui(struct state *state)
 {
 	int i, j;
 	char name[] = "AL_00";
 	char buf[64];
-
-	if (STREQ(fap->src_callsign, state->my_callsign))
-		return 0; /* Don't store our own packets */
-
-	if (last_packets[last_packet] &&
-	    !STREQ(fap->src_callsign, last_packets[last_packet]->src_callsign))
-		last_packet = (last_packet + 1) % KEEP_PACKETS;
-
-	if (last_packets[last_packet])
-		fap_free(last_packets[last_packet]);
-
-	last_packets[last_packet] = fap;
 
 	for (i = KEEP_PACKETS, j = last_packet+1; i > 0; i--, j++) {
 		fap_packet_t *p = last_packets[j % KEEP_PACKETS];
@@ -229,6 +217,64 @@ int store_packet(struct state *state, fap_packet_t *fap)
 					   buf, sizeof(buf));
 		set_value(name, buf);
 	}
+
+	return 0;
+}
+
+/* Move packets below @index to @index */
+int move_packets(struct state *state, int index)
+{
+	int i;
+	const int max = KEEP_PACKETS;
+	int end = (last_packet+1) % max;
+
+	fap_free(last_packets[index]);
+
+	for (i = index; i != end; i -= 1) {
+		if (i == 0)
+			i = KEEP_PACKETS; /* Zero now, KEEP-1 next */
+		last_packets[i % max] = last_packets[(i-1) % max];
+	}
+
+	/* This made a hole at the bottom */
+	last_packets[end] = NULL;
+
+	return 0;
+}
+
+int find_packet(struct state *state, fap_packet_t *fap)
+{
+	int i;
+
+	for (i = 0; i < KEEP_PACKETS; i++)
+		if (last_packets[i] &&
+		    STREQ(last_packets[i]->src_callsign, fap->src_callsign))
+			return i;
+
+	return -1;
+}
+
+int store_packet(struct state *state, fap_packet_t *fap)
+{
+	int i;
+
+	if (STREQ(fap->src_callsign, state->my_callsign))
+		return 0; /* Don't store our own packets */
+
+	i = find_packet(state, fap);
+	if (i != -1)
+		move_packets(state, i);
+	last_packet = (last_packet + 1) % KEEP_PACKETS;
+
+	/* If found in spot X, remove and shift all up, then
+	 * replace at top
+	 */
+
+	if (last_packets[last_packet])
+		fap_free(last_packets[last_packet]);
+	last_packets[last_packet] = fap;
+
+	update_packets_ui(state);
 
 	return 0;
 }
