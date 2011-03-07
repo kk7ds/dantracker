@@ -282,21 +282,18 @@ int update_mybeacon_status(struct state *state)
 {
 	char buf[512];
 	struct tm last_beacon;
-	const char *status = "  ..-^^|";
 	uint8_t quality = state->digi_quality;
-	int count = 0;
+	int count = 1;
 	int i;
-
-	localtime_r(&state->last_beacon, &last_beacon);
-
-	strftime(buf, sizeof(buf), " %H:%M:%S", &last_beacon);
 
 	for (i = 1; i < 8; i++)
 		count += (quality >> i) & 0x01;
 
-	/* FIXME: Make this pretty */
-	buf[0] = status[count];
+	sprintf(buf, "%i", count / 2);
+	set_value("G_SIGBARS", buf);
 
+	localtime_r(&state->last_beacon, &last_beacon);
+	strftime(buf, sizeof(buf), "%H:%M:%S", &last_beacon);
 	set_value("G_LASTBEACON", buf);
 }
 
@@ -465,7 +462,7 @@ int display_gps_info(struct state *state)
 	sprintf(buf, "ALT %4.0f ft", state->mypos.alt);
 	set_value("G_ALT", buf);
 
-	sprintf(buf, "%3.0f MPH %2s",
+	sprintf(buf, "%.0f MPH %2s",
 		KTS_TO_MPH(state->mypos.speed),
 		state->mypos.speed > 2.0 ?
 		direction(state->mypos.course) : "");
@@ -715,7 +712,7 @@ int beacon(int fd, struct state *state)
 	if (!should_beacon(state))
 		return 0;
 
-	packet = make_beacon(state, "testing");
+	packet = make_beacon(state, "Testing...");
 	if (!packet) {
 		printf("Failed to make beacon TNC2 packet\n");
 		return 1;
@@ -763,8 +760,8 @@ int fake_gps_data(struct state *state)
 	state->mypos.lat = 45.525;
 	state->mypos.lon = -122.9164;
 	state->mypos.qual = 1;
-	state->mypos.speed = 8;
-	state->mypos.course = 123;
+	state->mypos.speed = 0;
+	state->mypos.course = 0;
 	state->mypos.sats = 4;
 }
 
@@ -793,9 +790,10 @@ int main(int argc, char **argv)
 	redir_log();
 
 	memset(&state, 0, sizeof(state));
+	//state.digi_quality = 0xFF;
+	state.last_beacon = 0;
 
 	set_mycall(&state, "KK7DS", 10);
-	state.last_beacon = time(NULL);
 
 	fap_init();
 

@@ -75,6 +75,7 @@ struct element_layout gps_info_elements[] = {
 	{"G_MYCALL",  30, 310},
 	{"G_LASTBEACON",   250, 310},
 	{"G_REASON",       400, 310},
+	{"G_SIGBARS", 640, 310},
 	{NULL, 0, 0}
 };
 
@@ -152,6 +153,39 @@ int make_icon(struct layout *l, const char *name)
 	gtk_widget_show(e->widget);
 }
 
+int update_bars(struct named_element *e, const char *value)
+{
+	GdkPixbuf *icon;
+	int bars = atoi(value);
+	char *path = NULL;
+
+	if (asprintf(&path, "images/bars_%i.png", bars) == -1)
+		return 0;
+
+	icon = gdk_pixbuf_new_from_file(path, NULL);
+	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
+
+	/* FIXME: Free icon? */
+
+	printf("Updated bars to %i\n", bars);
+
+	free(path);
+
+	return 0;
+}
+
+int make_bars(struct layout *l, const char *name)
+{
+	struct named_element *e = &l->elements[l->nxt++];
+
+	e->name = name;
+	e->type = TYPE_IMAGE;
+	e->widget = gtk_image_new();
+	e->update_fn = update_bars;
+
+	gtk_widget_show(e->widget);
+}
+
 int put_widgets(struct layout *l, struct element_layout *layouts)
 {
 	int i;
@@ -205,6 +239,7 @@ int make_gps_info(struct layout *l)
 	make_text_label(l, "G_MYCALL",  "", "Sans 20");
 	make_text_label(l, "G_LASTBEACON",  "", "Sans 20");
 	make_text_label(l, "G_REASON",  "", "Sans 20");
+	make_bars(l, "G_SIGBARS");
 
 	put_widgets(l, gps_info_elements);
 }
@@ -360,7 +395,7 @@ int main(int argc, char **argv)
 
 	gtk_init(&argc, &argv);
 
-	aprs_pri_img = gdk_pixbuf_new_from_file("/root/carputer/aprs_pri.png", NULL);
+	aprs_pri_img = gdk_pixbuf_new_from_file("images/aprs_pri.png", NULL);
 
 	layout.max = 32;
 	layout.nxt = 0;
