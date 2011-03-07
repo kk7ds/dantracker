@@ -51,7 +51,6 @@ const char *CARDINALS[] = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
 
 const char *direction(double degrees)
 {
-	printf("Converting %.0f degrees\n", degrees);
 	return CARDINALS[((int)((degrees + 360 - 22.5) / 45.0)) % 7];
 }
 
