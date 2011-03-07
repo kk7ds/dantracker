@@ -42,6 +42,7 @@ struct element_layout {
 };
 
 GdkPixbuf *aprs_pri_img;
+GdkPixbuf *aprs_sec_img;
 
 struct element_layout aprs_info_elements[] = {
 	{"AI_ICON",     20, 0},
@@ -131,9 +132,9 @@ int update_icon(struct named_element *e, const char *value)
 	int index = value[1] - '!';
 	int x = 63 * (index % 16);
 	int y = 63 * (index / 16);
+	GdkPixbuf *source = value[0] == '\\' ? aprs_sec_img : aprs_pri_img;
 
-	icon = gdk_pixbuf_new_subpixbuf(aprs_pri_img,
-					x, y, 60, 60);
+	icon = gdk_pixbuf_new_subpixbuf(source, x, y, 60, 60);
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
 
 	printf("Updated icon %i,%i for %s\n", x,y,value);
@@ -395,7 +396,10 @@ int main(int argc, char **argv)
 
 	gtk_init(&argc, &argv);
 
-	aprs_pri_img = gdk_pixbuf_new_from_file("images/aprs_pri.png", NULL);
+	aprs_pri_img = gdk_pixbuf_new_from_file("images/aprs_pri_big.png",
+						NULL);
+	aprs_sec_img = gdk_pixbuf_new_from_file("images/aprs_sec_big.png",
+						NULL);
 
 	layout.max = 32;
 	layout.nxt = 0;
