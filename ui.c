@@ -134,7 +134,7 @@ int make_text_label(struct layout *l,
  * So, since we scale it up by a factor of APRS_IMG_MULT, we locate an
  * icon by skipping 20*MULT icon pixels and 1*MULT lines.
  */
-#define APRS_IMG_MULT 4
+#define APRS_IMG_MULT 5
 int update_icon(struct named_element *e, const char *value)
 {
 	GdkPixbuf *icon;

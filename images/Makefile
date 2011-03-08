@@ -1,5 +1,5 @@
 
-APRS_ICON_SIZE=400%
+APRS_ICON_SIZE=500%
 
 IMAGES = aprs_pri_big.png aprs_sec_big.png
 
