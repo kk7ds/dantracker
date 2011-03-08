@@ -128,6 +128,98 @@ int get_packet(int fd, char *buf, unsigned int *len)
 
 #define TZ_OFFSET (-8)
 
+void display_wx(fap_packet_t *_fap)
+{
+	fap_wx_report_t *fap = _fap->wx_report;
+	char *wind = NULL;
+	char *temp = NULL;
+	char *rain = NULL;
+	char *humid = NULL;
+	char *pres = NULL;
+	char *report = NULL;
+
+	if (fap->wind_gust && fap->wind_dir && fap->wind_speed)
+		asprintf(&wind, "Wind %s %.0fmph (%.0f gst) ",
+			 direction(*fap->wind_dir),
+			 MS_TO_MPH(*fap->wind_speed),
+			 MS_TO_MPH(*fap->wind_gust));
+	else if (fap->wind_dir && fap->wind_speed)
+		asprintf(&wind, "Wind %s %.0f mph ",
+			 direction(*fap->wind_dir),
+			 MS_TO_MPH(*fap->wind_speed));
+
+	if (fap->temp)
+		asprintf(&temp, "%.0fF ", C_TO_F(*fap->temp));
+
+	if (fap->rain_1h && *fap->rain_24h)
+		asprintf(&rain, "Rain %.2f\"h%.2f\"d ",
+			 MM_TO_IN(*fap->rain_1h),
+			 MM_TO_IN(*fap->rain_24h));
+	else if (fap->rain_1h)
+		asprintf(&rain, "Rain %.2f\"h ", MM_TO_IN(*fap->rain_1h));
+	else if (fap->rain_24h)
+		asprintf(&rain, "Rain %.2f\"d ", MM_TO_IN(*fap->rain_24h));
+
+	if (fap->humidity)
+		asprintf(&humid, "Hum. %2i%% ", *fap->humidity);
+
+	asprintf(&report, "%s%s%s%s",
+		 wind ? wind : "",
+		 temp ? temp : "",
+		 rain ? rain : "",
+		 humid ? humid : "");
+
+	set_value("AI_COMMENT", report);
+
+	/* Comment is used for larger WX report, so report the
+	 * comment (if any) in the smaller course field
+	 */
+	if (_fap->comment_len) {
+		char buf[512];
+
+		strncpy(buf, _fap->comment, _fap->comment_len);
+		buf[_fap->comment_len] = 0;
+		set_value("AI_COURSE", buf);
+	} else
+		set_value("AI_COURSE", "");
+
+	free(report);
+	free(pres);
+	free(humid);
+	free(rain);
+	free(temp);
+	free(wind);
+}
+
+void display_telemetry(fap_telemetry_t *fap)
+{
+	set_value("AI_COURSE", "(Telemetry)");
+}
+
+void display_posit(fap_packet_t *fap, int isnew)
+{
+	char buf[512];
+
+	if (fap->speed && fap->course && (*fap->speed > 0.0)) {
+		snprintf(buf, sizeof(buf), "%.0f MPH %2s",
+			 KPH_TO_MPH(*fap->speed),
+			 direction(*fap->course));
+		set_value("AI_COURSE", buf);
+	} else if (isnew)
+		set_value("AI_COURSE", "");
+
+	if (fap->type && (*fap->type == fapSTATUS)) {
+		strncpy(buf, fap->status, fap->status_len);
+		buf[fap->status_len] = 0;
+		set_value("AI_COMMENT", buf);
+	} else if (fap->comment_len) {
+		strncpy(buf, fap->comment, fap->comment_len);
+		buf[fap->comment_len] = 0;
+		set_value("AI_COMMENT", buf);
+	} else if (isnew)
+		set_value("AI_COMMENT", "");
+}
+
 void display_packet(fap_packet_t *fap, double mylat, double mylon)
 {
 	char buf[512];
@@ -163,28 +255,15 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 	} else if (isnew)
 		set_value("AI_DISTANCE", "");
 
-	if (fap->speed && fap->course && (*fap->speed > 0.0)) {
-		snprintf(buf, sizeof(buf), "%.0f MPH %2s",
-			 KPH_TO_MPH(*fap->speed),
-			 direction(*fap->course));
-		set_value("AI_COURSE", buf);
-	} else if (isnew)
-		set_value("AI_COURSE", "");
-
-	if (fap->type && (*fap->type == fapSTATUS)) {
-		strncpy(buf, fap->status, fap->status_len);
-		buf[fap->status_len] = 0;
-		set_value("AI_COMMENT", buf);
-	} else if (fap->comment_len) {
-		strncpy(buf, fap->comment, fap->comment_len);
-		buf[fap->comment_len] = 0;
-		set_value("AI_COMMENT", buf);
-	} else if (isnew)
-		set_value("AI_COMMENT", "");
+	if (fap->wx_report)
+		display_wx(fap);
+	else if (fap->telemetry)
+		display_telemetry(fap->telemetry);
+	else
+		display_posit(fap, isnew);
 
 	snprintf(buf, sizeof(buf), "%c%c", fap->symbol_table, fap->symbol_code);
 	set_value("AI_ICON", buf);
-
 }
 
 int stored_packet_desc(fap_packet_t *fap, int index,
@@ -480,7 +559,7 @@ int display_gps_info(struct state *state)
 	set_value("G_SPD", buf);
 
 	sprintf(buf, "%7s: %02i sats",
-		state->mypos.qual != 0 ? "OK" : "INVALID",
+		state->mypos.qual != 0 ? "OK" : "<span foreground='red'>INVALID</span>",
 		state->mypos.sats);
 	set_value("G_STATUS", buf);
 
