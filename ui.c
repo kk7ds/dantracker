@@ -45,11 +45,11 @@ GdkPixbuf *aprs_pri_img;
 GdkPixbuf *aprs_sec_img;
 
 struct element_layout aprs_info_elements[] = {
-	{"AI_ICON",     20, 0},
-	{"AI_CALLSIGN", 90,  10},
+	{"AI_ICON",     600, 0},
+	{"AI_CALLSIGN", 30,  10},
 	{"AI_COURSE",   30,  50},
 	{"AI_COMMENT",  30,  80},
-	{"AI_DISTANCE", 450, 15},
+	{"AI_DISTANCE", 350, 15},
 	{NULL, 0, 0}
 };
 
@@ -126,18 +126,27 @@ int make_text_label(struct layout *l,
 	return 0;
 }
 
+/* The standard APRS icon map looks like this:
+ *
+ *  | 20 pixels |
+ *
+ * In other words, 20 pixels of image data and one of a separator line.
+ * So, since we scale it up by a factor of APRS_IMG_MULT, we locate an
+ * icon by skipping 20*MULT icon pixels and 1*MULT lines.
+ */
+#define APRS_IMG_MULT 4
 int update_icon(struct named_element *e, const char *value)
 {
 	GdkPixbuf *icon;
 	int index = value[1] - '!';
-	int x = 63 * (index % 16);
-	int y = 63 * (index / 16);
+	int x = (20 + 1) * APRS_IMG_MULT * (index % 16);
+	int y = (20 + 1) * APRS_IMG_MULT * (index / 16);
 	GdkPixbuf *source = value[0] == '\\' ? aprs_sec_img : aprs_pri_img;
 
-	icon = gdk_pixbuf_new_subpixbuf(source, x, y, 60, 60);
+	icon = gdk_pixbuf_new_subpixbuf(source, x, y,
+					20 * APRS_IMG_MULT,
+					20 * APRS_IMG_MULT);
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
-
-	printf("Updated icon %i,%i for %s\n", x,y,value);
 
 	return 0;
 }
