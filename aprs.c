@@ -217,13 +217,14 @@ int update_packets_ui(struct state *state)
 	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
 		fap_packet_t *p = state->recent[j % KEEP_PACKETS];
 		double distance;
-		buf[0] = 0;
 
 		sprintf(name, "AL_%02i", i-1);
 		if (p)
 			stored_packet_desc(p, i,
 					   state->mypos.lat, state->mypos.lon,
 					   buf, sizeof(buf));
+		else
+			sprintf(buf, "%i:", i);
 		set_value(name, buf);
 	}
 
