@@ -9,6 +9,8 @@
 #include <time.h>
 #include <math.h>
 #include <errno.h>
+#include <termios.h>
+#include <getopt.h>
 
 #include <fap.h>
 
@@ -19,7 +21,16 @@
 #define STREQ(x,y) (strcmp(x, y) == 0)
 #define STRNEQ(x,y,n) (strncmp(x, y, n) == 0)
 
+#define KEEP_PACKETS 8
+
 struct state {
+	struct {
+		char *tnc;
+		char *gps;
+		int testing;
+		int verbose;
+	} conf;
+
 	struct {
 		double lat;
 		double lon;
@@ -37,6 +48,9 @@ struct state {
 	char mycall[7];
 	int ssid;
 	char my_callsign[32];
+
+	fap_packet_t *recent[KEEP_PACKETS];
+	int recent_idx;
 
 	char gps_buffer[128];
 	int gps_idx;
@@ -104,10 +118,6 @@ int get_packet(int fd, char *buf, unsigned int *len)
 
 	return ret;
 }
-
-#define KEEP_PACKETS 8
-fap_packet_t *last_packets[KEEP_PACKETS];
-int last_packet = 0;
 
 #define KPH_TO_MPH(km) (km * 0.621371192)
 #define MS_TO_MPH(m) (m * 2.23693629)
@@ -204,8 +214,8 @@ int update_packets_ui(struct state *state)
 	char name[] = "AL_00";
 	char buf[64];
 
-	for (i = KEEP_PACKETS, j = last_packet+1; i > 0; i--, j++) {
-		fap_packet_t *p = last_packets[j % KEEP_PACKETS];
+	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
+		fap_packet_t *p = state->recent[j % KEEP_PACKETS];
 		double distance;
 		buf[0] = 0;
 
@@ -225,18 +235,18 @@ int move_packets(struct state *state, int index)
 {
 	int i;
 	const int max = KEEP_PACKETS;
-	int end = (last_packet+1) % max;
+	int end = (state->recent_idx +1 ) % max;
 
-	fap_free(last_packets[index]);
+	fap_free(state->recent[index]);
 
 	for (i = index; i != end; i -= 1) {
 		if (i == 0)
 			i = KEEP_PACKETS; /* Zero now, KEEP-1 next */
-		last_packets[i % max] = last_packets[(i-1) % max];
+		state->recent[i % max] = state->recent[(i - 1) % max];
 	}
 
 	/* This made a hole at the bottom */
-	last_packets[end] = NULL;
+	state->recent[end] = NULL;
 
 	return 0;
 }
@@ -246,8 +256,8 @@ int find_packet(struct state *state, fap_packet_t *fap)
 	int i;
 
 	for (i = 0; i < KEEP_PACKETS; i++)
-		if (last_packets[i] &&
-		    STREQ(last_packets[i]->src_callsign, fap->src_callsign))
+		if (state->recent[i] &&
+		    STREQ(state->recent[i]->src_callsign, fap->src_callsign))
 			return i;
 
 	return -1;
@@ -263,15 +273,15 @@ int store_packet(struct state *state, fap_packet_t *fap)
 	i = find_packet(state, fap);
 	if (i != -1)
 		move_packets(state, i);
-	last_packet = (last_packet + 1) % KEEP_PACKETS;
+	state->recent_idx = (state->recent_idx + 1) % KEEP_PACKETS;
 
 	/* If found in spot X, remove and shift all up, then
 	 * replace at top
 	 */
 
-	if (last_packets[last_packet])
-		fap_free(last_packets[last_packet]);
-	last_packets[last_packet] = fap;
+	if (state->recent[state->recent_idx])
+		fap_free(state->recent[state->recent_idx]);
+	state->recent[state->recent_idx] = fap;
 
 	update_packets_ui(state);
 
@@ -775,6 +785,87 @@ int set_mycall(struct state *state, char *callsign, int ssid)
 	return 0;
 }
 
+int serial_set_rate(int fd, int baudrate)
+{
+	struct termios term;
+	int ret;
+
+	ret = tcgetattr(fd, &term);
+	if (ret < 0)
+		goto err;
+
+	cfmakeraw(&term);
+	cfsetspeed(&term, B9600);
+
+	ret = tcsetattr(fd, TCSAFLUSH, &term);
+	if (ret < 0)
+		goto err;
+
+	return 0;
+ err:
+	perror("unable to configure serial port");
+	return ret;
+}
+
+int tnc_open(const char *device, int baudrate)
+{
+	int fd;
+	int ret;
+
+	fd = open(device, O_RDWR);
+	if (fd < 0)
+		return fd;
+
+	ret = serial_set_rate(fd, baudrate);
+	if (ret) {
+		close(fd);
+		fd = ret;
+	}
+
+	return fd;
+}
+
+int parse_opts(int argc, char **argv, struct state *state)
+{
+	static struct option lopts[] = {
+		{"tnc",     1, 0, 't'},
+		{"gps",     1, 0, 'g'},
+		{"testing", 0, 0,  1 },
+		{"verbose", 0, 0, 'v'},
+		{NULL,      0, 0, 0},
+	};
+
+	while (1) {
+		int c;
+		int optidx;
+
+		c = getopt_long(argc, argv, "t:g:sv",
+				lopts, &optidx);
+		if (c == -1)
+			break;
+
+		switch(c) {
+		case 't':
+			state->conf.tnc = optarg;
+			break;
+		case 'g':
+			state->conf.gps = optarg;
+			break;
+		case '1':
+			state->conf.testing = 1;
+			break;
+		case 'v':
+			state->conf.verbose = 1;
+			break;
+		case '?':
+			printf("Unknown option\n");
+			return -1;
+		};
+	}
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	int tncfd;
@@ -786,31 +877,37 @@ int main(int argc, char **argv)
 	fd_set fds;
 
 	struct state state;
-
-	redir_log();
-
 	memset(&state, 0, sizeof(state));
-	//state.digi_quality = 0xFF;
-	state.last_beacon = 0;
-
-	set_mycall(&state, "KK7DS", 10);
 
 	fap_init();
 
+	if (parse_opts(argc, argv, &state))
+		exit(1);
+
+	if (!state.conf.verbose)
+		redir_log();
+
+	if (state.conf.testing)
+		state.digi_quality = 0xFF;
+
+	state.last_beacon = 0;
+	set_mycall(&state, "KK7DS", 10);
+
 	for (i = 0; i < KEEP_PACKETS; i++)
-		last_packets[i] = NULL;
+		state.recent[i] = NULL;
 
-	tncfd = open(argv[1], O_RDWR);
-	if (tncfd < 0) {
-		perror(argv[1]);
+	tncfd = tnc_open(state.conf.tnc, 9600);
+	if (tncfd < 0)
 		exit(1);
-	}
 
-	gpsfd = open(argv[2], O_RDONLY);
-	if (gpsfd < 0) {
-		perror(argv[2]);
-		exit(1);
-	}
+	if (state.conf.gps) {
+		gpsfd = open(state.conf.gps, O_RDONLY);
+		if (gpsfd < 0) {
+			perror(argv[2]);
+			exit(1);
+		}
+	} else
+		gpsfd = -1;
 
 	FD_ZERO(&fds);
 
@@ -819,8 +916,11 @@ int main(int argc, char **argv)
 		struct timeval tv = {1, 0};
 
 		FD_SET(tncfd, &fds);
-		FD_SET(gpsfd, &fds);
-		//fake_gps_data(&state);
+		if (gpsfd > 0)
+			FD_SET(gpsfd, &fds);
+
+		if (state.conf.testing)
+			fake_gps_data(&state);
 
 		ret = select(gpsfd+1, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
