@@ -164,7 +164,7 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 		set_value("AI_DISTANCE", "");
 
 	if (fap->speed && fap->course && (*fap->speed > 0.0)) {
-		snprintf(buf, sizeof(buf), "%3.0f MPH %2s",
+		snprintf(buf, sizeof(buf), "%.0f MPH %2s",
 			 KPH_TO_MPH(*fap->speed),
 			 direction(*fap->course));
 		set_value("AI_COURSE", buf);
