@@ -91,6 +91,7 @@ struct state {
 	char gps_buffer[128];
 	int gps_idx;
 	time_t last_gps_update;
+	time_t last_gps_data;
 	time_t last_beacon;
 	time_t last_time_set;
 
@@ -233,6 +234,7 @@ void display_wx(fap_packet_t *_fap)
 void display_telemetry(fap_telemetry_t *fap)
 {
 	set_value("AI_COURSE", "(Telemetry)");
+	set_value("AI_COMMENT", "");
 }
 
 void display_phg(fap_packet_t *fap)
@@ -254,14 +256,15 @@ void display_phg(fap_packet_t *fap)
 		 pow(2, height - '0') * 10,
 		 gain,
 		 dir ? direction(dir) : "omni");
-	set_value("AI_COURSE", buf);
+	set_value("AI_COMMENT", buf);
 	free(buf);
 
 	if (fap->comment) {
 		buf = strndup(fap->comment, fap->comment_len);
-		set_value("AI_COMMENT", buf);
+		set_value("AI_COURSE", buf);
 		free(buf);
-	}
+	} else
+		set_value("AI_COURSE", "");
 }
 
 void display_posit(fap_packet_t *fap, int isnew)
@@ -622,10 +625,12 @@ int display_gps_info(struct state *state)
 	sprintf(buf, "ALT %4.0f ft", state->mypos.alt);
 	set_value("G_ALT", buf);
 
-	sprintf(buf, "%.0f MPH %2s",
-		KTS_TO_MPH(state->mypos.speed),
-		state->mypos.speed > 2.0 ?
-		direction(state->mypos.course) : "");
+	if (state->mypos.speed > 1.0)
+		sprintf(buf, "%.0f MPH %2s",
+			KTS_TO_MPH(state->mypos.speed),
+			direction(state->mypos.course));
+	else
+		sprintf(buf, "Stationary");
 	set_value("G_SPD", buf);
 
 	sprintf(buf, "%7s: %02i sats",
@@ -714,6 +719,8 @@ int handle_gps_data(int fd, struct state *state)
 		set_time(state);
 	}
 
+	state->last_gps_data = time(NULL);
+
 	return 0;
 }
 
@@ -780,8 +787,6 @@ char *choose_data(struct state *state, char *req_icon)
 	char *data = NULL;
 	int cmt = state->comment_idx++ % state->conf.comments_count;
 
-	printf("SPEED: %.0f\n", state->mypos.speed);
-
 	/* We're moving, so we do course/speed */
 	if (state->mypos.speed > 5) {
 		asprintf(&data, "%03.0f/%03.0f%s",
@@ -794,7 +799,8 @@ char *choose_data(struct state *state, char *req_icon)
 	/* We're not moving, so choose a type */
 	switch (state->other_beacon_idx++ % 3) {
 	case DO_TYPE_WX:
-		if (state->conf.do_types & DO_TYPE_WX) {
+		if ((state->conf.do_types & DO_TYPE_WX) &&
+		    ((time(NULL) - state->tel.last_tel) < 30)) {
 			*req_icon = '_';
 			asprintf(&data,
 				 ".../...g...t%03.0fr...p...P...P...h..b.....%s",
@@ -897,6 +903,12 @@ int should_beacon(struct state *state)
 		goto out;
 	}
 
+	/* Never when we aren't getting data anymore */
+	if ((time(NULL) - state->last_gps_data) > 30) {
+		reason = "NODATA";
+		goto out;
+	}
+
 	/* If we're not moving at all, choose the "at rest" rate */
 	if (state->mypos.speed <= 1) {
 		req = state->conf.atrest_rate;
@@ -946,9 +958,10 @@ int should_beacon(struct state *state)
 		set_value("G_REASON", tmp);
 	}
 
-	if (req == 0)
+	if (req == 0) {
+		update_mybeacon_status(state);
 		return 0;
-	else if (req == -1)
+	} else if (req == -1)
 		return 1;
 	else
 		return delta > req;
@@ -1123,9 +1136,7 @@ char **parse_list(char *string, int *count)
 			i++;
 	*count = i+1;
 
-	printf("Count: %i\n", *count);
 	list = calloc(*count, sizeof(char **));
-	printf("Alloc'd %i: %p\n", *count, list);
 	if (!list)
 		return NULL;
 
@@ -1136,10 +1147,8 @@ char **parse_list(char *string, int *count)
 			ptr++;
 		}
 		list[i] = strdup(string);
-		printf("Doing element %s\n", list[i]);
 		string = ptr;
 	}
-	printf("Done with elements\n");
 
 	return list;
 }
@@ -1244,8 +1253,6 @@ int parse_ini(char *filename, struct state *state)
 			state->conf.comments[i] = iniparser_getstring(ini,
 								      section,
 								      "INVAL");
-			printf("Comment %s: %s (%i)\n", section,
-			       state->conf.comments[i], i);
 		}
 	}
 	return 0;
