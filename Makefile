@@ -1,4 +1,6 @@
-CFLAGS += -Ilibfap-1.1/src -Llibfap-1.1/src/.libs -g
+CFLAGS += -g
+APRS_CFLAGS = -Ilibfap-1.1/src -Llibfap-1.1/src/.libs
+APRS_CFLAGS += -Iiniparser/src #iniparser/libiniparser.so.0
 GTK_CFLAGS = `pkg-config --cflags 'gtk+-2.0'`
 GTK_LIBS = `pkg-config --libs 'gtk+-2.0'`
 
@@ -10,7 +12,7 @@ all: aprs ui uiclient
 uiclient.o: uiclient.c ui.h
 
 aprs: aprs.c uiclient.o
-	$(CC) $(CFLAGS) -lfap -o $@ $^
+	$(CC) $(CFLAGS) $(APRS_CFLAGS) -lfap -liniparser -o $@ $^
 
 ui: ui.c uiclient.o
 	$(CC) $(CFLAGS) $(GTK_CFLAGS) $(GTK_LIBS) $(GLIB_CFLAGS) $(GLIB_LIBS) $< -o $@

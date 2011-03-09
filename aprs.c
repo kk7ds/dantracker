@@ -13,6 +13,7 @@
 #include <getopt.h>
 
 #include <fap.h>
+#include <iniparser.h>
 
 #include "ui.h"
 
@@ -23,6 +24,15 @@
 
 #define KEEP_PACKETS 8
 
+#define DO_TYPE_NONE 0
+#define DO_TYPE_WX   1
+#define DO_TYPE_PHG  2
+
+struct smart_beacon_point {
+	float int_sec;
+	float speed;
+};
+
 struct state {
 	struct {
 		char *tnc;
@@ -30,6 +40,25 @@ struct state {
 		char *tel;
 		int testing;
 		int verbose;
+		char *icon;
+
+		char *digi_path;
+
+		int power;
+		int height;
+		int gain;
+		int directivity;
+
+		int atrest_rate;
+		struct smart_beacon_point sb_low;
+		struct smart_beacon_point sb_high;
+		int course_change;
+
+		unsigned int do_types;
+
+		char **comments;
+		int comments_count;
+
 	} conf;
 
 	struct {
@@ -49,11 +78,12 @@ struct state {
 	struct {
 		double temp1;
 		double voltage;
+
+		time_t last_tel_beacon;
+		time_t last_tel;
 	} tel;
 
-	char mycall[7];
-	int ssid;
-	char my_callsign[32];
+	char *mycall;
 
 	fap_packet_t *recent[KEEP_PACKETS];
 	int recent_idx;
@@ -63,6 +93,9 @@ struct state {
 	time_t last_gps_update;
 	time_t last_beacon;
 	time_t last_time_set;
+
+	int comment_idx;
+	int other_beacon_idx;
 
 	uint8_t digi_quality;
 };
@@ -384,7 +417,7 @@ int store_packet(struct state *state, fap_packet_t *fap)
 {
 	int i;
 
-	if (STREQ(fap->src_callsign, state->my_callsign))
+	if (STREQ(fap->src_callsign, state->mycall))
 		return 0; /* Don't store our own packets */
 
 	i = find_packet(state, fap);
@@ -443,7 +476,7 @@ int handle_incoming_packet(int fd, struct state *state)
 	if (!fap->error_code) {
 		display_packet(fap, state->mypos.lat, state->mypos.lon);
 		store_packet(state, fap);
-		if (STREQ(fap->src_callsign, state->my_callsign)) {
+		if (STREQ(fap->src_callsign, state->mycall)) {
 			state->digi_quality |= 1;
 			update_mybeacon_status(state);
 		}
@@ -606,7 +639,7 @@ int display_gps_info(struct state *state)
 		(state->mypos.tstamp % 100));
 	//set_value("G_TIME", buf);
 
-	set_value("G_MYCALL", state->my_callsign);
+	set_value("G_MYCALL", state->mycall);
 
 }
 
@@ -732,19 +765,70 @@ int handle_telemetry(int fd, struct state *state)
 	snprintf(_buf, sizeof(_buf), "%.0fF", state->tel.temp1);
 	set_value("T_TEMP1", _buf);
 
+	state->tel.last_tel = time(NULL);
+
 	return 0;
 }
 
-char *make_beacon(struct state *state, char *comment)
+/*
+ * Choose a comment out of the list, and choose a type
+ * of (phg, wx, normal) from the list of configured types
+ * and construct it.
+ */
+char *choose_data(struct state *state, char *req_icon)
 {
+	char *data = NULL;
+	int cmt = state->comment_idx++ % state->conf.comments_count;
+
+	printf("SPEED: %.0f\n", state->mypos.speed);
+
+	/* We're moving, so we do course/speed */
+	if (state->mypos.speed > 5) {
+		asprintf(&data, "%03.0f/%03.0f%s",
+			 state->mypos.course,
+			 state->mypos.speed,
+			 state->conf.comments[cmt]);
+		return data;
+	}
+
+	/* We're not moving, so choose a type */
+	switch (state->other_beacon_idx++ % 3) {
+	case DO_TYPE_WX:
+		if (state->conf.do_types & DO_TYPE_WX) {
+			*req_icon = '_';
+			asprintf(&data,
+				 ".../...g...t%03.0fr...p...P...P...h..b.....%s",
+				 state->tel.temp1,
+				 state->conf.comments[cmt]);
+			return data;
+		}
+	case DO_TYPE_PHG:
+		if (state->conf.do_types & DO_TYPE_PHG) {
+			asprintf(&data,
+				 "PHG%1d%1d%1d%1d%s",
+				 state->conf.power,
+				 state->conf.height,
+				 state->conf.gain,
+				 state->conf.directivity,
+				 state->conf.comments[cmt]);
+			return data;
+		}
+	case DO_TYPE_NONE:
+		return strdup(state->conf.comments[cmt]);
+	}
+}
+
+char *make_beacon(struct state *state, char *payload)
+{
+	char *data = NULL;
 	char *packet;
 	char _lat[16];
 	char _lon[16];
 	int ret;
+	char icon = state->conf.icon[1];
 
 	double lat = fabs(state->mypos.lat);
 	double lon = fabs(state->mypos.lon);
-	char course[] = "000/000";
 
 	snprintf(_lat, 16, "%02.0f%05.2f%c",
 		 floor(lat),
@@ -756,34 +840,26 @@ char *make_beacon(struct state *state, char *comment)
 		 (lon - floor(lon)) * 60,
 		 state->mypos.lon > 0 ? 'E' : 'W');
 
-	if (state->mypos.speed > 1.0)
-		snprintf(course, sizeof(course),
-			 "%03.0f/%03.0f",
-			 state->mypos.course,
-			 state->mypos.speed);
-	else
-		strcpy(course, "");
+	if (!payload)
+		payload = data = choose_data(state, &icon);
 
 	ret = asprintf(&packet,
-		       "%s-%i>APZDMS,WIDE1-1,WIDE2-1:!%s%c%s%c%s%s",
-		       state->mycall, state->ssid,
+		       "%s>APZDMS,%s:!%s%c%s%c%s",
+		       state->mycall,
+		       state->conf.digi_path,
 		       _lat,
-		       '/',
+		       state->conf.icon[0],
 		       _lon,
-		       'j',
-		       course,
-		       comment);
+		       icon,
+		       payload);
+
+	free(data);
 
 	if (ret < 0)
 		return NULL;
 
 	return packet;
 }
-
-struct smart_beacon_point {
-	float int_sec;
-	float speed;
-};
 
 int should_beacon(struct state *state)
 {
@@ -793,9 +869,8 @@ int should_beacon(struct state *state)
 	double sb_course_change = fabs(state->mypos.last_course -
 				       state->mypos.course);
 	float speed_frac;
-
-	struct smart_beacon_point sb_low  = { 300, 10 };
-	struct smart_beacon_point sb_high = {  60, 60 };
+	float d_speed = state->conf.sb_high.speed - state->conf.sb_low.speed;
+	float d_rate = state->conf.sb_low.int_sec - state->conf.sb_high.int_sec;
 
 	char *reason = NULL;
 
@@ -809,12 +884,12 @@ int should_beacon(struct state *state)
 		return 0;
 
 	/* The fractional penetration into the lo/hi zone */
-	speed_frac = (KTS_TO_MPH(state->mypos.speed) - sb_low.speed) /
-		(sb_high.speed - sb_low.speed);
+	speed_frac = (KTS_TO_MPH(state->mypos.speed) -
+		      state->conf.sb_low.speed) / d_speed;
 
 	/* Determine the fractional that we are slower than the max */
-	sb_min_delta = (fabs(sb_high.int_sec - sb_low.int_sec) *
-			(1 - speed_frac)) + sb_high.int_sec;
+	sb_min_delta = (d_rate * (1 - speed_frac)) +
+		state->conf.sb_high.int_sec;
 
 	/* Never when we don't have a fix */
 	if (state->mypos.qual == 0) {
@@ -822,10 +897,10 @@ int should_beacon(struct state *state)
 		goto out;
 	}
 
-	/* Never less often than every 30 minutes */
-	if (delta > (30 * 60)) {
-		reason = "30MIN";
-		req = -1;
+	/* If we're not moving at all, choose the "at rest" rate */
+	if (state->mypos.speed <= 1) {
+		req = state->conf.atrest_rate;
+		reason = "ATREST";
 		goto out;
 	}
 
@@ -843,15 +918,15 @@ int should_beacon(struct state *state)
 	/* SmartBeaconing: Range-based variable speed beaconing */
 
 	/* If we're going below the low point, use that interval */
-	if (KTS_TO_MPH(state->mypos.speed) < sb_low.speed) {
-		req = sb_low.int_sec;
+	if (KTS_TO_MPH(state->mypos.speed) < state->conf.sb_low.speed) {
+		req = state->conf.sb_low.int_sec;
 		reason = "SLOWTO";
 		goto out;
 	}
 
 	/* If we're going above the high point, use that interval */
-	if (KTS_TO_MPH(state->mypos.speed) > sb_high.speed) {
-		req = sb_high.int_sec;
+	if (KTS_TO_MPH(state->mypos.speed) > state->conf.sb_high.speed) {
+		req = state->conf.sb_high.int_sec;
 		reason = "FASTTO";
 		goto out;
 	}
@@ -890,10 +965,7 @@ int beacon(int fd, struct state *state)
 	if (!should_beacon(state))
 		return 0;
 
-	snprintf(buf, sizeof(buf), "Temp=%.0fF Voltage=%.1fV",
-		 state->tel.temp1, state->tel.voltage);
-
-	packet = make_beacon(state, buf);
+	packet = make_beacon(state, NULL);
 	if (!packet) {
 		printf("Failed to make beacon TNC2 packet\n");
 		return 1;
@@ -944,14 +1016,13 @@ int fake_gps_data(struct state *state)
 	state->mypos.speed = 0;
 	state->mypos.course = 0;
 	state->mypos.sats = 4;
+
+	state->tel.temp1 = 72.1;
 }
 
-int set_mycall(struct state *state, char *callsign, int ssid)
+int set_mycall(struct state *state, char *callsign)
 {
 	strcpy(state->mycall, callsign);
-	state->ssid = ssid;
-	snprintf(state->my_callsign, sizeof(state->my_callsign),
-		 "%s-%i", callsign, ssid);
 
 	return 0;
 }
@@ -1041,6 +1112,145 @@ int parse_opts(int argc, char **argv, struct state *state)
 	return 0;
 }
 
+char **parse_list(char *string, int *count)
+{
+	char **list;
+	char *ptr;
+	int i = 0;
+
+	for (ptr = string; *ptr; ptr++)
+		if (*ptr == ',')
+			i++;
+	*count = i+1;
+
+	printf("Count: %i\n", *count);
+	list = calloc(*count, sizeof(char **));
+	printf("Alloc'd %i: %p\n", *count, list);
+	if (!list)
+		return NULL;
+
+	for (i = 0; string; i++) {
+		ptr = strchr(string, ',');
+		if (ptr) {
+			*ptr = 0;
+			ptr++;
+		}
+		list[i] = strdup(string);
+		printf("Doing element %s\n", list[i]);
+		string = ptr;
+	}
+	printf("Done with elements\n");
+
+	return list;
+}
+
+int parse_ini(char *filename, struct state *state)
+{
+	dictionary *ini;
+	char *tmp;
+	int ret;
+
+	ini = iniparser_load(filename);
+	if (ini == NULL)
+		return -EINVAL;
+
+	if (!state->conf.tnc)
+		state->conf.tnc = iniparser_getstring(ini, "tnc:port", NULL);
+
+	if (!state->conf.gps)
+		state->conf.gps = iniparser_getstring(ini, "gps:port", NULL);
+
+	if (!state->conf.tel)
+		state->conf.tel = iniparser_getstring(ini, "telemetry:port",
+						      NULL);
+
+	state->mycall = iniparser_getstring(ini, "station:mycall", "N0CAL-7");
+	state->conf.icon = iniparser_getstring(ini, "station:icon", "/>");
+
+	if (strlen(state->conf.icon) != 2) {
+		printf("ERROR: Icon must be two characters, not `%s'\n",
+		       state->conf.icon);
+		return -1;
+	}
+
+	state->conf.digi_path = iniparser_getstring(ini, "station:digi_path",
+						    "WIDE1-1,WIDE2-1");
+
+	state->conf.power = iniparser_getint(ini, "station:power", 0);
+	state->conf.height = iniparser_getint(ini, "station:height", 0);
+	state->conf.gain = iniparser_getint(ini, "station:gain", 0);
+	state->conf.directivity = iniparser_getint(ini, "station:directivity",
+						   0);
+
+	state->conf.atrest_rate = iniparser_getint(ini,
+						   "beaconing:atrest_rate",
+						   600);
+	state->conf.sb_low.speed = iniparser_getint(ini,
+						    "beaconing:min_speed",
+						    10);
+	state->conf.sb_low.int_sec = iniparser_getint(ini,
+						      "beaconing:min_rate",
+						      600);
+	state->conf.sb_high.speed = iniparser_getint(ini,
+						     "beaconing:max_speed",
+						     60);
+	state->conf.sb_high.int_sec = iniparser_getint(ini,
+						       "beaconing:max_rate",
+						       60);
+	state->conf.course_change = iniparser_getint(ini,
+						     "beaconing:course_change",
+						     30);
+
+	tmp = iniparser_getstring(ini, "station:beacon_types", "posit");
+	if (strlen(tmp) != 0) {
+		char **types;
+		int count;
+		int i;
+
+		types = parse_list(tmp, &count);
+		if (!types) {
+			printf("Failed to parse beacon types\n");
+			return -EINVAL;
+		}
+
+		for (i = 0; i < count; i++) {
+			if (STREQ(types[i], "weather"))
+				state->conf.do_types |= DO_TYPE_WX;
+			else if (STREQ(types[i], "phg"))
+				state->conf.do_types |= DO_TYPE_PHG;
+			else
+				printf("WARNING: Unknown beacon type %s\n",
+				       types[i]);
+			free(types[i]);
+		}
+		free(types);
+	}
+
+	tmp = iniparser_getstring(ini, "comments:enabled", "");
+	if (strlen(tmp) != 0) {
+		int i;
+
+		state->conf.comments = parse_list(tmp,
+						  &state->conf.comments_count);
+		if (!state->conf.comments)
+			return -EINVAL;
+
+		for (i = 0; i < state->conf.comments_count; i++) {
+			char section[32];
+
+			snprintf(section, sizeof(section),
+				 "comments:%s", state->conf.comments[i]);
+			free(state->conf.comments[i]);
+			state->conf.comments[i] = iniparser_getstring(ini,
+								      section,
+								      "INVAL");
+			printf("Comment %s: %s (%i)\n", section,
+			       state->conf.comments[i], i);
+		}
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	int tncfd;
@@ -1062,6 +1272,11 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
+	if (parse_ini("aprs.ini", &state)) {
+		printf("Invalid config\n");
+		exit(1);
+	}
+
 	if (!state.conf.verbose)
 		redir_log();
 
@@ -1069,7 +1284,6 @@ int main(int argc, char **argv)
 		state.digi_quality = 0xFF;
 
 	state.last_beacon = 0;
-	set_mycall(&state, "KK7DS", 10);
 
 	for (i = 0; i < KEEP_PACKETS; i++)
 		state.recent[i] = NULL;
