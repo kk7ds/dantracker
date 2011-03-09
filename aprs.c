@@ -27,6 +27,7 @@ struct state {
 	struct {
 		char *tnc;
 		char *gps;
+		char *tel;
 		int testing;
 		int verbose;
 	} conf;
@@ -44,6 +45,11 @@ struct state {
 
 		double last_course;
 	} mypos;
+
+	struct {
+		double temp1;
+		double voltage;
+	} tel;
 
 	char mycall[7];
 	int ssid;
@@ -196,6 +202,35 @@ void display_telemetry(fap_telemetry_t *fap)
 	set_value("AI_COURSE", "(Telemetry)");
 }
 
+void display_phg(fap_packet_t *fap)
+{
+	int power, gain, dir;
+	char height;
+	int ret;
+	char *buf = NULL;
+
+	ret = sscanf(fap->phg, "%1d%c%1d%1d",
+		     &power, &height, &gain, &dir);
+	if (ret != 4) {
+		set_value("AI_COURSE", "(Broken PHG)");
+		return;
+	}
+
+	asprintf(&buf, "Power %iW at %.0fft (%idB gain @ %s)",
+		 power*power,
+		 pow(2, height - '0') * 10,
+		 gain,
+		 dir ? direction(dir) : "omni");
+	set_value("AI_COURSE", buf);
+	free(buf);
+
+	if (fap->comment) {
+		buf = strndup(fap->comment, fap->comment_len);
+		set_value("AI_COMMENT", buf);
+		free(buf);
+	}
+}
+
 void display_posit(fap_packet_t *fap, int isnew)
 {
 	char buf[512];
@@ -259,6 +294,8 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 		display_wx(fap);
 	else if (fap->telemetry)
 		display_telemetry(fap->telemetry);
+	else if (fap->phg)
+		display_phg(fap);
 	else
 		display_posit(fap, isnew);
 
@@ -647,6 +684,57 @@ int handle_gps_data(int fd, struct state *state)
 	return 0;
 }
 
+int handle_telemetry(int fd, struct state *state)
+{
+	char _buf[512] = "";
+	int i = 0;
+	int ret;
+	char *buf = _buf;
+	char *space;
+
+	while (i < sizeof(_buf)) {
+		ret = read(fd, &buf[i], 1);
+		if (buf[i] == '\n')
+			break;
+		if (ret < 0)
+			return -ret;
+		else if (ret == 1)
+			i++;
+	}
+
+	while (buf && *buf != '\n') {
+		char name[16];
+		char value[16];
+
+		space = strchr(buf, ' ');
+		if (space)
+			*space = 0;
+
+		ret = sscanf(buf, "%16[^=]=%16s", (char*)&name, (char*)&value);
+		if (ret != 2) {
+			printf("Invalid telemetry: %s\n", buf);
+			return -EINVAL;
+		}
+
+		buf = space+1;
+
+		if (STREQ(name, "temp1"))
+			state->tel.temp1 = atof(value);
+		else if (STREQ(name, "voltage"))
+			state->tel.voltage = atof(value);
+		else
+			printf("Unknown telemetry value %s\n", name);
+	}
+
+	snprintf(_buf, sizeof(_buf), "%.1fV", state->tel.voltage);
+	set_value("T_VOLTAGE", _buf);
+
+	snprintf(_buf, sizeof(_buf), "%.0fF", state->tel.temp1);
+	set_value("T_TEMP1", _buf);
+
+	return 0;
+}
+
 char *make_beacon(struct state *state, char *comment)
 {
 	char *packet;
@@ -802,7 +890,10 @@ int beacon(int fd, struct state *state)
 	if (!should_beacon(state))
 		return 0;
 
-	packet = make_beacon(state, "Testing...");
+	snprintf(buf, sizeof(buf), "Temp=%.0fF Voltage=%.1fV",
+		 state->tel.temp1, state->tel.voltage);
+
+	packet = make_beacon(state, buf);
 	if (!packet) {
 		printf("Failed to make beacon TNC2 packet\n");
 		return 1;
@@ -908,18 +999,19 @@ int tnc_open(const char *device, int baudrate)
 int parse_opts(int argc, char **argv, struct state *state)
 {
 	static struct option lopts[] = {
-		{"tnc",     1, 0, 't'},
-		{"gps",     1, 0, 'g'},
-		{"testing", 0, 0,  1 },
-		{"verbose", 0, 0, 'v'},
-		{NULL,      0, 0, 0},
+		{"tnc",       1, 0, 't'},
+		{"gps",       1, 0, 'g'},
+		{"telemetry", 1, 0, 'T'},
+		{"testing",   0, 0,  1 },
+		{"verbose",   0, 0, 'v'},
+		{NULL,        0, 0,  0 },
 	};
 
 	while (1) {
 		int c;
 		int optidx;
 
-		c = getopt_long(argc, argv, "t:g:sv",
+		c = getopt_long(argc, argv, "t:g:T:sv",
 				lopts, &optidx);
 		if (c == -1)
 			break;
@@ -931,7 +1023,10 @@ int parse_opts(int argc, char **argv, struct state *state)
 		case 'g':
 			state->conf.gps = optarg;
 			break;
-		case '1':
+		case 'T':
+			state->conf.tel = optarg;
+			break;
+		case 1:
 			state->conf.testing = 1;
 			break;
 		case 'v':
@@ -950,6 +1045,7 @@ int main(int argc, char **argv)
 {
 	int tncfd;
 	int gpsfd;
+	int telfd;
 	double mylat = 45.525;
 	double mylon = -122.9164;
 	int i;
@@ -961,8 +1057,10 @@ int main(int argc, char **argv)
 
 	fap_init();
 
-	if (parse_opts(argc, argv, &state))
+	if (parse_opts(argc, argv, &state)) {
+		printf("Invalid option(s)\n");
 		exit(1);
+	}
 
 	if (!state.conf.verbose)
 		redir_log();
@@ -977,17 +1075,28 @@ int main(int argc, char **argv)
 		state.recent[i] = NULL;
 
 	tncfd = tnc_open(state.conf.tnc, 9600);
-	if (tncfd < 0)
+	if (tncfd < 0) {
+		printf("Failed to open TNC: %m\n");
 		exit(1);
+	}
 
 	if (state.conf.gps) {
 		gpsfd = open(state.conf.gps, O_RDONLY);
 		if (gpsfd < 0) {
-			perror(argv[2]);
+			perror(state.conf.gps);
 			exit(1);
 		}
 	} else
 		gpsfd = -1;
+
+	if (state.conf.tel) {
+		telfd = tnc_open(state.conf.tel, 9600);
+		if (telfd < 0) {
+			perror(state.conf.tel);
+			exit(1);
+		}
+	} else
+		telfd = -1;
 
 	FD_ZERO(&fds);
 
@@ -998,11 +1107,13 @@ int main(int argc, char **argv)
 		FD_SET(tncfd, &fds);
 		if (gpsfd > 0)
 			FD_SET(gpsfd, &fds);
+		if (telfd > 0)
+			FD_SET(telfd, &fds);
 
 		if (state.conf.testing)
 			fake_gps_data(&state);
 
-		ret = select(gpsfd+1, &fds, NULL, NULL, &tv);
+		ret = select(telfd+1, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
 			perror("select");
 			continue;
@@ -1012,6 +1123,8 @@ int main(int argc, char **argv)
 			handle_incoming_packet(tncfd, &state);
 		if (FD_ISSET(gpsfd, &fds))
 			handle_gps_data(gpsfd, &state);
+		if (FD_ISSET(telfd, &fds))
+			handle_telemetry(telfd, &state);
 
 		beacon(tncfd, &state);
 		fflush(NULL);

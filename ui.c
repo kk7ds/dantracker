@@ -29,6 +29,7 @@ struct layout {
 	GtkWidget *fixed;
 	GtkWidget *sep1;
 	GtkWidget *sep2;
+	GtkWidget *sep3;
 
 	unsigned int max;
 	unsigned int nxt;
@@ -78,6 +79,12 @@ struct element_layout gps_info_elements[] = {
 	{"G_REASON",       400, 310},
 	{"G_SIGBARS", 640, 310},
 	{NULL, 0, 0}
+};
+
+struct element_layout telemetry_elements[] = {
+	{"T_VOLTAGE",  30, 350},
+	{"T_TEMP1",   150, 350},
+	{NULL,          0,   0}
 };
 
 struct named_element *get_element(struct layout *l, const char *name)
@@ -254,6 +261,14 @@ int make_gps_info(struct layout *l)
 	put_widgets(l, gps_info_elements);
 }
 
+int make_telemetry(struct layout *l)
+{
+	make_text_label(l, "T_VOLTAGE",  "", "Sans 18");
+	make_text_label(l, "T_TEMP1",  "", "Sans 18");
+
+	put_widgets(l, telemetry_elements);
+}
+
 int make_window(struct layout *l)
 {
 	GdkColor color = {0, 0, 0};
@@ -279,6 +294,7 @@ int make_window(struct layout *l)
 	make_aprs_info(l);
 	make_aprs_list(l);
 	make_gps_info(l);
+	make_telemetry(l);
 
 	l->sep1 = gtk_hseparator_new();
 	gtk_widget_set_size_request(l->sep1, 720, 10);
@@ -290,6 +306,10 @@ int make_window(struct layout *l)
 	gtk_widget_show(l->sep2);
 	gtk_fixed_put(GTK_FIXED(l->fixed), l->sep2, 0, 240);
 
+	l->sep3 = gtk_hseparator_new();
+	gtk_widget_set_size_request(l->sep3, 720, 10);
+	gtk_widget_show(l->sep3);
+	gtk_fixed_put(GTK_FIXED(l->fixed), l->sep3, 0, 340);
 }
 
 int server_setup()
