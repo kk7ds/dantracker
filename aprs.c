@@ -22,6 +22,8 @@
 #define STREQ(x,y) (strcmp(x, y) == 0)
 #define STRNEQ(x,y,n) (strncmp(x, y, n) == 0)
 
+#define HAS_BEEN(s, d) ((time(NULL) - s) > d)
+
 #define KEEP_PACKETS 8
 
 #define DO_TYPE_NONE 0
@@ -38,6 +40,8 @@ struct state {
 		char *tnc;
 		char *gps;
 		char *tel;
+
+		char *gps_type;
 		int testing;
 		int verbose;
 		char *icon;
@@ -58,6 +62,11 @@ struct state {
 
 		char **comments;
 		int comments_count;
+
+		char *config;
+
+		double static_lat, static_lon, static_alt;
+		double static_spd, static_crs;
 
 	} conf;
 
@@ -658,7 +667,7 @@ int set_time(struct state *state)
 
 	if (state->mypos.qual == 0)
 		return 1; /* No fix, no set */
-	else if ((time(NULL) - state->last_time_set) < 120)
+	else if (!HAS_BEEN(state->last_time_set, 120))
 		return 1; /* Too recent */
 
 	tm.tm_mday = dstamp / 10000;
@@ -696,6 +705,12 @@ int handle_gps_data(int fd, struct state *state)
 	ret = read(fd, buf, 32);
 	buf[ret] = 0; /* Safe because size is +1 */
 
+	if (ret < 0) {
+		perror("gps");
+		return -errno;
+	} else if (ret == 0)
+		return 0;
+
 	if (state->gps_idx + ret > sizeof(state->gps_buffer)) {
 		printf("Clearing overrun buffer\n");
 		state->gps_idx = 0;
@@ -713,7 +728,7 @@ int handle_gps_data(int fd, struct state *state)
 		state->gps_idx += ret;
 	}
 
-	if ((time(NULL) - state->last_gps_update) > 3) {
+	if (HAS_BEEN(state->last_gps_update, 3)) {
 		display_gps_info(state);
 		state->last_gps_update = time(NULL);
 		set_time(state);
@@ -777,6 +792,94 @@ int handle_telemetry(int fd, struct state *state)
 	return 0;
 }
 
+/* Get a substitution value for a given key (result must be free()'d) */
+char *get_subst(struct state *state, char *key)
+{
+	char *value;
+	struct tm tm;
+	char timestr[16];
+	time_t t;
+
+	t = time(NULL);
+	localtime_r(&t, &tm);
+
+	if (STREQ(key, "index"))
+		asprintf(&value, "%i",
+			 state->comment_idx++ % state->conf.comments_count);
+	else if (STREQ(key, "mycall"))
+		value = strdup(state->mycall);
+	else if (STREQ(key, "temp1"))
+		asprintf(&value, "%.0f", state->tel.temp1);
+	else if (STREQ(key, "voltage"))
+		asprintf(&value, "%.1f", state->tel.voltage);
+	else if (STREQ(key, "sats"))
+		asprintf(&value, "%i", state->mypos.sats);
+	else if (STREQ(key, "ver"))
+		asprintf(&value, "v0.1");
+	else if (STREQ(key, "time")) {
+		strftime(timestr, sizeof(timestr), "%H:%M:%S", &tm);
+		value = strdup(timestr);
+	} else if (STREQ(key, "date")) {
+		strftime(timestr, sizeof(timestr), "%m/%d/%Y", &tm);
+		value = strdup(timestr);
+	} else
+		printf("Unknown substitution `%s'", key);
+
+	return value;
+}
+
+/* Given a string with substition variables, do the substitutions
+ * and return the new result (which must be free()'d)
+ */
+char *process_subst(struct state *state, char *src)
+{
+	char *str;
+	char *ptr1;
+	char *ptr2;
+
+	/* FIXME: might overrun! */
+	str = malloc(strlen(src) * 2);
+	if (!str)
+		return str;
+	str[0] = 0;
+
+	for (ptr1 = src; *ptr1; ptr1++) {
+		char subst[16] = "";
+		char *value = NULL;
+
+		ptr2 = strchr(ptr1, '$');
+		if (!ptr2) {
+			/* No more substs */
+			strcat(str, ptr1);
+			break;
+		}
+
+		/* Copy up to the next variable */
+		strncat(str, ptr1, ptr2-ptr1);
+
+		ptr1 = ptr2+1;
+		ptr2 = strchr(ptr1, '$');
+		if (!ptr2) {
+			printf("Bad substitution `%s'\n", ptr1);
+			goto err;
+		}
+
+		strncpy(subst, ptr1, ptr2-ptr1);
+		ptr1 = ptr2;
+
+		value = get_subst(state, subst);
+		if (value) {
+			strcat(str, value);
+			free(value);
+		}
+	}
+
+	return str;
+ err:
+	free(str);
+	return NULL;
+}
+
 /*
  * Choose a comment out of the list, and choose a type
  * of (phg, wx, normal) from the list of configured types
@@ -786,27 +889,32 @@ char *choose_data(struct state *state, char *req_icon)
 {
 	char *data = NULL;
 	int cmt = state->comment_idx++ % state->conf.comments_count;
+	char *comment;
+
+	comment = process_subst(state, state->conf.comments[cmt]);
+	if (!comment)
+		comment = strdup("Error");
 
 	/* We're moving, so we do course/speed */
 	if (state->mypos.speed > 5) {
 		asprintf(&data, "%03.0f/%03.0f%s",
 			 state->mypos.course,
 			 state->mypos.speed,
-			 state->conf.comments[cmt]);
-		return data;
+			 comment);
+		goto out;
 	}
 
 	/* We're not moving, so choose a type */
 	switch (state->other_beacon_idx++ % 3) {
 	case DO_TYPE_WX:
 		if ((state->conf.do_types & DO_TYPE_WX) &&
-		    ((time(NULL) - state->tel.last_tel) < 30)) {
+		    (!HAS_BEEN(state->tel.last_tel, 30))) {
 			*req_icon = '_';
 			asprintf(&data,
 				 ".../...g...t%03.0fr...p...P...P...h..b.....%s",
 				 state->tel.temp1,
-				 state->conf.comments[cmt]);
-			return data;
+				 comment);
+			break;
 		}
 	case DO_TYPE_PHG:
 		if (state->conf.do_types & DO_TYPE_PHG) {
@@ -816,12 +924,16 @@ char *choose_data(struct state *state, char *req_icon)
 				 state->conf.height,
 				 state->conf.gain,
 				 state->conf.directivity,
-				 state->conf.comments[cmt]);
-			return data;
+				 comment);
+			break;
 		}
 	case DO_TYPE_NONE:
-		return strdup(state->conf.comments[cmt]);
+		data = strdup(comment);
+		break;
 	}
+ out:
+	free(comment);
+	return data;
 }
 
 char *make_beacon(struct state *state, char *payload)
@@ -904,7 +1016,7 @@ int should_beacon(struct state *state)
 	}
 
 	/* Never when we aren't getting data anymore */
-	if ((time(NULL) - state->last_gps_data) > 30) {
+	if (HAS_BEEN(state->last_gps_data, 30)) {
 		reason = "NODATA";
 		goto out;
 	}
@@ -969,11 +1081,17 @@ int should_beacon(struct state *state)
 
 int beacon(int fd, struct state *state)
 {
-	time_t delta = time(NULL) - state->last_beacon;
 	char *packet;
 	char buf[512];
 	unsigned int len = sizeof(buf);
 	int ret;
+	static time_t max_beacon_check = 0;
+
+	/* Don't even check but every half-second */
+	if (!HAS_BEEN(max_beacon_check, 0.5))
+		return 0;
+
+	max_beacon_check = time(NULL);
 
 	if (!should_beacon(state))
 		return 0;
@@ -1023,14 +1141,21 @@ int redir_log()
 
 int fake_gps_data(struct state *state)
 {
-	state->mypos.lat = 45.525;
-	state->mypos.lon = -122.9164;
-	state->mypos.qual = 1;
-	state->mypos.speed = 0;
-	state->mypos.course = 0;
-	state->mypos.sats = 4;
+	state->mypos.lat = state->conf.static_lat;
+	state->mypos.lon = state->conf.static_lon;
+	state->mypos.alt = state->conf.static_alt;
+	state->mypos.speed = state->conf.static_spd;
+	state->mypos.course = state->conf.static_crs;
 
-	state->tel.temp1 = 72.1;
+	state->mypos.qual = 1;
+	state->mypos.sats = 0; /* We may claim qual=1, but no sats */
+
+	state->last_gps_data = time(NULL);
+
+	if ((time(NULL) - state->last_gps_update) > 3) {
+		display_gps_info(state);
+		state->last_gps_update = time(NULL);
+	}
 }
 
 int set_mycall(struct state *state, char *callsign)
@@ -1088,6 +1213,7 @@ int parse_opts(int argc, char **argv, struct state *state)
 		{"telemetry", 1, 0, 'T'},
 		{"testing",   0, 0,  1 },
 		{"verbose",   0, 0, 'v'},
+		{"conf",      1, 0, 'c'},
 		{NULL,        0, 0,  0 },
 	};
 
@@ -1095,7 +1221,7 @@ int parse_opts(int argc, char **argv, struct state *state)
 		int c;
 		int optidx;
 
-		c = getopt_long(argc, argv, "t:g:T:sv",
+		c = getopt_long(argc, argv, "t:g:T:c:sv",
 				lopts, &optidx);
 		if (c == -1)
 			break;
@@ -1115,6 +1241,9 @@ int parse_opts(int argc, char **argv, struct state *state)
 			break;
 		case 'v':
 			state->conf.verbose = 1;
+			break;
+		case 'c':
+			state->conf.config = optarg;
 			break;
 		case '?':
 			printf("Unknown option\n");
@@ -1169,6 +1298,8 @@ int parse_ini(char *filename, struct state *state)
 	if (!state->conf.gps)
 		state->conf.gps = iniparser_getstring(ini, "gps:port", NULL);
 
+	state->conf.gps_type = iniparser_getstring(ini, "gps:type", "static");
+
 	if (!state->conf.tel)
 		state->conf.tel = iniparser_getstring(ini, "telemetry:port",
 						      NULL);
@@ -1209,6 +1340,22 @@ int parse_ini(char *filename, struct state *state)
 	state->conf.course_change = iniparser_getint(ini,
 						     "beaconing:course_change",
 						     30);
+
+	state->conf.static_lat = iniparser_getdouble(ini,
+						     "static:lat",
+						     0.0);
+	state->conf.static_lon = iniparser_getdouble(ini,
+						     "static:lon",
+						     0.0);
+	state->conf.static_alt = iniparser_getdouble(ini,
+						     "static:alt",
+						     0.0);
+	state->conf.static_spd = iniparser_getdouble(ini,
+						     "static:speed",
+						     0.0);
+	state->conf.static_crs = iniparser_getdouble(ini,
+						     "static:course",
+						     0.0);
 
 	tmp = iniparser_getstring(ini, "station:beacon_types", "posit");
 	if (strlen(tmp) != 0) {
@@ -1279,7 +1426,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	if (parse_ini("aprs.ini", &state)) {
+	if (parse_ini(state.conf.config ? state.conf.config : "aprs.ini", &state)) {
 		printf("Invalid config\n");
 		exit(1);
 	}
@@ -1331,7 +1478,7 @@ int main(int argc, char **argv)
 		if (telfd > 0)
 			FD_SET(telfd, &fds);
 
-		if (state.conf.testing)
+		if (STREQ(state.conf.gps_type, "static"))
 			fake_gps_data(&state);
 
 		ret = select(telfd+1, &fds, NULL, NULL, &tv);
