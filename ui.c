@@ -217,9 +217,9 @@ int put_widgets(struct layout *l, struct element_layout *layouts)
 int make_aprs_info(struct layout *l)
 {
 	make_text_label(l, "AI_CALLSIGN", "N0CALL", "Monospace Bold 32");
-	make_text_label(l, "AI_COURSE",   "", "Monospace 22");
+	make_text_label(l, "AI_COURSE",   "", "Sans 22");
 	make_text_label(l, "AI_COMMENT",  "", "Sans 18");
-	make_text_label(l, "AI_DISTANCE", "", "Monospace 22");
+	make_text_label(l, "AI_DISTANCE", "", "Sans 22");
 	make_icon(l, "AI_ICON");
 
 	put_widgets(l, aprs_info_elements);
