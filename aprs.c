@@ -1203,7 +1203,7 @@ int serial_set_rate(int fd, int baudrate)
 		goto err;
 
 	cfmakeraw(&term);
-	cfsetspeed(&term, B9600);
+	cfsetspeed(&term, baudrate);
 
 	ret = tcsetattr(fd, TCSAFLUSH, &term);
 	if (ret < 0)
@@ -1224,7 +1224,7 @@ int tnc_open(const char *device, int baudrate)
 	if (fd < 0)
 		return fd;
 
-	ret = serial_set_rate(fd, baudrate);
+	ret = serial_set_rate(fd, B9600);
 	if (ret) {
 		close(fd);
 		fd = ret;
@@ -1482,6 +1482,7 @@ int main(int argc, char **argv)
 			perror(state.conf.gps);
 			exit(1);
 		}
+		serial_set_rate(gpsfd, B4800);
 	} else
 		gpsfd = -1;
 
