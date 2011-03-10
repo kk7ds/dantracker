@@ -2,7 +2,7 @@
 APRS_ICON_SIZE=500%
 
 IMAGES = aprs_pri_big.png aprs_sec_big.png
-RESIZE_TYPE=-scale
+RESIZE_TYPE=-adaptive-resize
 
 all: $(IMAGES)
 

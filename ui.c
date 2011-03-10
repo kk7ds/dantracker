@@ -50,7 +50,7 @@ struct element_layout aprs_info_elements[] = {
 	{"AI_CALLSIGN", 30,  10},
 	{"AI_COURSE",   30,  50},
 	{"AI_COMMENT",  30,  80},
-	{"AI_DISTANCE", 350, 15},
+	{"AI_DISTANCE", 250, 15},
 	{NULL, 0, 0}
 };
 
@@ -69,10 +69,8 @@ struct element_layout aprs_list_elements[] = {
 
 struct element_layout gps_info_elements[] = {
 	{"G_LATLON",  30, 250},
-	{"G_ALT",    370, 250},
 
 	{"G_SPD",     30, 280},
-	{"G_STATUS", 370, 280},
 
 	{"G_MYCALL",  30, 310},
 	{"G_LASTBEACON",   250, 310},
@@ -249,9 +247,7 @@ int make_aprs_list(struct layout *l)
 int make_gps_info(struct layout *l)
 {
 	make_text_label(l, "G_LATLON",  "", "Sans 18");
-	make_text_label(l, "G_ALT",     "", "Sans 18");
 	make_text_label(l, "G_SPD",     "", "Sans 20");
-	make_text_label(l, "G_STATUS",  "", "Sans 20");
 
 	make_text_label(l, "G_MYCALL",  "", "Sans 20");
 	make_text_label(l, "G_LASTBEACON",  "", "Sans 20");
