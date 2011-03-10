@@ -1,6 +1,6 @@
 CFLAGS += -g
-APRS_CFLAGS = -Ilibfap-1.1/src -Llibfap-1.1/src/.libs
-APRS_CFLAGS += -Iiniparser/src #iniparser/libiniparser.so.0
+APRS_CFLAGS = -Ilibfap-1.1/src
+APRS_CFLAGS += -Iiniparser/src
 GTK_CFLAGS = `pkg-config --cflags 'gtk+-2.0'`
 GTK_LIBS = `pkg-config --libs 'gtk+-2.0'`
 

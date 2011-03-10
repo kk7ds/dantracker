@@ -38,8 +38,11 @@ struct smart_beacon_point {
 struct state {
 	struct {
 		char *tnc;
+		int tnc_rate;
 		char *gps;
+		int gps_rate;
 		char *tel;
+		int tel_rate;
 
 		char *gps_type;
 		int testing;
@@ -1193,6 +1196,22 @@ int set_mycall(struct state *state, char *callsign)
 	return 0;
 }
 
+int get_rate_const(int baudrate)
+{
+	switch (baudrate) {
+	case 1200:   return B1200;
+	case 4800:   return B4800;
+	case 9600:   return B9600;
+	case 19200:  return B19200;
+	case 38400:  return B38400;
+	case 115200: return B115200;
+	};
+
+	printf("Unsupported baudrate %i\n", baudrate);
+
+	return B9600;
+}
+
 int serial_set_rate(int fd, int baudrate)
 {
 	struct termios term;
@@ -1203,7 +1222,7 @@ int serial_set_rate(int fd, int baudrate)
 		goto err;
 
 	cfmakeraw(&term);
-	cfsetspeed(&term, baudrate);
+	cfsetspeed(&term, get_rate_const(baudrate));
 
 	ret = tcsetattr(fd, TCSAFLUSH, &term);
 	if (ret < 0)
@@ -1215,7 +1234,7 @@ int serial_set_rate(int fd, int baudrate)
 	return ret;
 }
 
-int tnc_open(const char *device, int baudrate)
+int serial_open(const char *device, int baudrate)
 {
 	int fd;
 	int ret;
@@ -1224,7 +1243,7 @@ int tnc_open(const char *device, int baudrate)
 	if (fd < 0)
 		return fd;
 
-	ret = serial_set_rate(fd, B9600);
+	ret = serial_set_rate(fd, baudrate);
 	if (ret) {
 		close(fd);
 		fd = ret;
@@ -1322,15 +1341,17 @@ int parse_ini(char *filename, struct state *state)
 
 	if (!state->conf.tnc)
 		state->conf.tnc = iniparser_getstring(ini, "tnc:port", NULL);
+	state->conf.tnc_rate = iniparser_getint(ini, "tnc:rate", 9600);
 
 	if (!state->conf.gps)
 		state->conf.gps = iniparser_getstring(ini, "gps:port", NULL);
-
 	state->conf.gps_type = iniparser_getstring(ini, "gps:type", "static");
+	state->conf.gps_rate = iniparser_getint(ini, "gps:rate", 4800);
 
 	if (!state->conf.tel)
 		state->conf.tel = iniparser_getstring(ini, "telemetry:port",
 						      NULL);
+	state->conf.tel_rate = iniparser_getint(ini, "telemetry:rate", 9600);
 
 	state->mycall = iniparser_getstring(ini, "station:mycall", "N0CAL-7");
 	state->conf.icon = iniparser_getstring(ini, "station:icon", "/>");
@@ -1470,24 +1491,23 @@ int main(int argc, char **argv)
 	for (i = 0; i < KEEP_PACKETS; i++)
 		state.recent[i] = NULL;
 
-	tncfd = tnc_open(state.conf.tnc, 9600);
+	tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate);
 	if (tncfd < 0) {
 		printf("Failed to open TNC: %m\n");
 		exit(1);
 	}
 
 	if (state.conf.gps) {
-		gpsfd = open(state.conf.gps, O_RDONLY);
+		gpsfd = serial_open(state.conf.gps, state.conf.gps_rate);
 		if (gpsfd < 0) {
 			perror(state.conf.gps);
 			exit(1);
 		}
-		serial_set_rate(gpsfd, B4800);
 	} else
 		gpsfd = -1;
 
 	if (state.conf.tel) {
-		telfd = tnc_open(state.conf.tel, 9600);
+		telfd = serial_open(state.conf.tel, state.conf.tel_rate);
 		if (telfd < 0) {
 			perror(state.conf.tel);
 			exit(1);
