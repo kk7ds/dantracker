@@ -305,6 +305,12 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 	char buf[512];
 	static char last_callsign[10] = "";
 	int isnew = 1;
+	char *via = "Direct";
+	int i;
+
+	for (i = 0; i < fap->path_len; i++)
+		if (strchr(fap->path[i], '*'))
+			via = fap->path[i];
 
 	if (STREQ(fap->src_callsign, last_callsign))
 		isnew = 1;
@@ -314,13 +320,14 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 	last_callsign[9] = 0;
 
 	if (fap->latitude && fap->longitude) {
-		snprintf(buf, sizeof(buf), "%5.1fmi %2s",
+		snprintf(buf, sizeof(buf), "%5.1fmi %2s <small>via %s</small>",
 			 KPH_TO_MPH(fap_distance(mylon, mylat,
 						 *fap->longitude,
 						 *fap->latitude)),
 			 direction(get_direction(mylon, mylat,
 						 *fap->longitude,
-						 *fap->latitude)));
+						 *fap->latitude)),
+			 via);
 		set_value("AI_DISTANCE", buf);
 	} else if (fap->latitude && fap->longitude && fap->altitude) {
 		snprintf(buf, 512, "%5.1fmi %2s (%4.0f ft)",
@@ -505,7 +512,7 @@ double parse_lat(char *str)
 
 	ret = sscanf(str, "%2i%f", &deg, &min);
 	if (ret != 2)
-		printf("Failed to parse %s\n", str);
+		return 0;
 
 	return deg + (min / 60.0);
 }
@@ -518,9 +525,28 @@ double parse_lon(char *str)
 
 	ret = sscanf(str, "%3i%f", &deg, &min);
 	if (ret != 2)
-		printf("Failed to parse %s\n", str);
+		return 0;
 
 	return deg + (min / 60.0);
+}
+
+int valid_checksum(char *str)
+{
+	char *ptr = str;
+	unsigned char c_cksum = 0;
+	unsigned char r_cksum;
+
+	if (str[0] != '$')
+		return 0;
+
+	str++; /* Past the $ */
+
+	for (ptr = str; *ptr && (*ptr != '*'); ptr++)
+		c_cksum ^= *ptr;
+
+	sscanf(ptr, "*%02hhx", &r_cksum);
+
+	return c_cksum == r_cksum;
 }
 
 int parse_gga(struct state *state, char *str)
@@ -568,7 +594,7 @@ int parse_gga(struct state *state, char *str)
 		field = strchr(str, ',');
 	}
 
-	return 0;
+	return 1;
 }
 
 int parse_rmc(struct state *state, char *str)
@@ -588,7 +614,7 @@ int parse_rmc(struct state *state, char *str)
 		switch (num) {
 		case 2:
 			if (*str != 'A') /* Not ACTIVE */
-				return 0;
+				return 1;
 			break;
 		case 7:
 			state->mypos.speed = atof(str);
@@ -606,7 +632,7 @@ int parse_rmc(struct state *state, char *str)
 		field = strchr(str, ',');
 	}
 
-	return 0;
+	return 1;
 }
 
 int parse_gps_string(struct state *state)
@@ -615,6 +641,9 @@ int parse_gps_string(struct state *state)
 
 	if (*str == '\n')
 		str++;
+
+	if (!valid_checksum(str))
+		return 0;
 
 	if (strncmp(str, "$GPGGA", 6) == 0)
 		return parse_gga(state, str);
@@ -627,31 +656,33 @@ int parse_gps_string(struct state *state)
 int display_gps_info(struct state *state)
 {
 	char buf[512];
+	const char *status = state->mypos.qual != 0 ?
+		"Locked" :
+		"<span foreground='red'>INVALID</span>";
+	int hour, min, sec;
 
-	sprintf(buf, "%7.5f %8.5f", state->mypos.lat, state->mypos.lon);
+	hour = (state->mypos.tstamp / 10000) + TZ_OFFSET;
+	min = (state->mypos.tstamp / 100) % 100;
+	sec = state->mypos.tstamp % 100;
+
+	if (hour < 0)
+		hour += 24;
+
+	sprintf(buf, "%7.5f %8.5f   Time %02i:%02i:%02i   %s: %2i sats",
+		state->mypos.lat, state->mypos.lon,
+		hour, min, sec,
+		status,
+		state->mypos.sats);
 	set_value("G_LATLON", buf);
 
-	sprintf(buf, "ALT %4.0f ft", state->mypos.alt);
-	set_value("G_ALT", buf);
-
 	if (state->mypos.speed > 1.0)
-		sprintf(buf, "%.0f MPH %2s",
+		sprintf(buf, "%.0f MPH %2s, Alt %.0f ft",
 			KTS_TO_MPH(state->mypos.speed),
-			direction(state->mypos.course));
+			direction(state->mypos.course),
+			state->mypos.alt);
 	else
-		sprintf(buf, "Stationary");
+		sprintf(buf, "Stationary, Alt %.0f ft", state->mypos.alt);
 	set_value("G_SPD", buf);
-
-	sprintf(buf, "%7s: %02i sats",
-		state->mypos.qual != 0 ? "OK" : "<span foreground='red'>INVALID</span>",
-		state->mypos.sats);
-	set_value("G_STATUS", buf);
-
-	sprintf(buf, "%02i:%02i:%02i",
-		(state->mypos.tstamp / 10000),
-		(state->mypos.tstamp / 100) % 100,
-		(state->mypos.tstamp % 100));
-	//set_value("G_TIME", buf);
 
 	set_value("G_MYCALL", state->mycall);
 
@@ -659,35 +690,33 @@ int display_gps_info(struct state *state)
 
 int set_time(struct state *state)
 {
-	struct tm tm;
 	time_t tstamp = state->mypos.tstamp;
 	time_t dstamp = state->mypos.dstamp;
 	char timestr[64];
 	int ret;
+	int hour, min, sec;
+	int day, mon, year;
 
 	if (state->mypos.qual == 0)
 		return 1; /* No fix, no set */
+	else if (state->mypos.sats < 3)
+		return 1; /* Not enough sats, don't set */
 	else if (!HAS_BEEN(state->last_time_set, 120))
 		return 1; /* Too recent */
 
-	tm.tm_mday = dstamp / 10000;
-	tm.tm_mon = (dstamp / 100) % 100;
-	tm.tm_year = (dstamp % 100);
+	hour = (tstamp / 10000);
+	min = (tstamp / 100) % 100;
+	sec = tstamp % 100;
 
-	tm.tm_hour = (tstamp / 10000) + TZ_OFFSET;
-	tm.tm_min = (tstamp / 100) % 100;
-	tm.tm_sec = (tstamp % 100);
-
-	if (tm.tm_hour < 0) {
-		tm.tm_hour *= -1;
-		tm.tm_mday -= 1;
-	}
+	day = (dstamp / 10000);
+	mon = (dstamp / 100) % 100;
+	year = dstamp % 100;
 
 	snprintf(timestr, sizeof(timestr),
-		 "date %02i%02i%02i%02i20%02i.%02i",
-		 tm.tm_mon, tm.tm_mday,
-		 tm.tm_hour, tm.tm_min,
-		 tm.tm_year, tm.tm_sec);
+		 "date -u %02i%02i%02i%02i20%02i.%02i",
+		 mon, day,
+		 hour, min,
+		 year, sec);
 
 	ret = system(timestr);
 	printf("Setting date %s: %s\n", timestr, ret == 0 ? "OK" : "FAIL");
@@ -720,7 +749,8 @@ int handle_gps_data(int fd, struct state *state)
 	if (cr) {
 		*cr = 0;
 		strcpy(&state->gps_buffer[state->gps_idx], buf);
-		parse_gps_string(state);
+		if (parse_gps_string(state))
+			state->last_gps_data = time(NULL);
 		strcpy(state->gps_buffer, cr+1);
 		state->gps_idx = strlen(state->gps_buffer);
 	} else {
@@ -728,13 +758,11 @@ int handle_gps_data(int fd, struct state *state)
 		state->gps_idx += ret;
 	}
 
-	if (HAS_BEEN(state->last_gps_update, 3)) {
+	if (HAS_BEEN(state->last_gps_update, 1)) {
 		display_gps_info(state);
 		state->last_gps_update = time(NULL);
 		set_time(state);
 	}
-
-	state->last_gps_data = time(NULL);
 
 	return 0;
 }
@@ -1009,15 +1037,15 @@ int should_beacon(struct state *state)
 	sb_min_delta = (d_rate * (1 - speed_frac)) +
 		state->conf.sb_high.int_sec;
 
-	/* Never when we don't have a fix */
-	if (state->mypos.qual == 0) {
-		reason = "NOLOCK";
-		goto out;
-	}
-
 	/* Never when we aren't getting data anymore */
 	if (HAS_BEEN(state->last_gps_data, 30)) {
 		reason = "NODATA";
+		goto out;
+	}
+
+	/* Never when we don't have a fix */
+	if (state->mypos.qual == 0) {
+		reason = "NOLOCK";
 		goto out;
 	}
 
