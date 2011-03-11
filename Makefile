@@ -12,7 +12,8 @@ all: aprs ui uiclient
 uiclient.o: uiclient.c ui.h
 
 aprs: aprs.c uiclient.o
-	$(CC) $(CFLAGS) $(APRS_CFLAGS) -lfap -liniparser -o $@ $^
+	echo $$((`cat .revision` + 1)) > .revision
+	$(CC) $(CFLAGS) $(APRS_CFLAGS) -lfap -liniparser -o $@ $^ -DBUILD=`cat .revision`
 
 ui: ui.c uiclient.o
 	$(CC) $(CFLAGS) $(GTK_CFLAGS) $(GTK_LIBS) $(GLIB_CFLAGS) $(GLIB_LIBS) $< -o $@

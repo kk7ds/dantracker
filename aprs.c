@@ -846,7 +846,7 @@ char *get_subst(struct state *state, char *key)
 	else if (STREQ(key, "sats"))
 		asprintf(&value, "%i", state->mypos.sats);
 	else if (STREQ(key, "ver"))
-		asprintf(&value, "v0.1");
+		asprintf(&value, "v0.1.%04i", BUILD);
 	else if (STREQ(key, "time")) {
 		strftime(timestr, sizeof(timestr), "%H:%M:%S", &tm);
 		value = strdup(timestr);
@@ -1467,6 +1467,8 @@ int main(int argc, char **argv)
 
 	struct state state;
 	memset(&state, 0, sizeof(state));
+
+	printf("APRS v0.1.%04i\n", BUILD);
 
 	fap_init();
 
