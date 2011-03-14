@@ -463,7 +463,7 @@ int store_packet(struct state *state, fap_packet_t *fap)
 int update_mybeacon_status(struct state *state)
 {
 	char buf[512];
-	struct tm last_beacon;
+	time_t delta = (time(NULL) - state->last_beacon);
 	uint8_t quality = state->digi_quality;
 	int count = 1;
 	int i;
@@ -471,11 +471,10 @@ int update_mybeacon_status(struct state *state)
 	for (i = 1; i < 8; i++)
 		count += (quality >> i) & 0x01;
 
-	sprintf(buf, "%i", count / 2);
+	snprintf(buf, sizeof(buf), "%i", count / 2);
 	set_value("G_SIGBARS", buf);
 
-	localtime_r(&state->last_beacon, &last_beacon);
-	strftime(buf, sizeof(buf), "%H:%M:%S", &last_beacon);
+	snprintf(buf, sizeof(buf), "%lu sec ago", delta);
 	set_value("G_LASTBEACON", buf);
 }
 
@@ -1488,8 +1487,6 @@ int main(int argc, char **argv)
 	if (state.conf.testing)
 		state.digi_quality = 0xFF;
 
-	state.last_beacon = 0;
-
 	for (i = 0; i < KEEP_PACKETS; i++)
 		state.recent[i] = NULL;
 
@@ -1536,14 +1533,14 @@ int main(int argc, char **argv)
 		if (ret == -1) {
 			perror("select");
 			continue;
+		} else if (ret > 0) {
+			if (FD_ISSET(tncfd, &fds))
+				handle_incoming_packet(tncfd, &state);
+			if (FD_ISSET(gpsfd, &fds))
+				handle_gps_data(gpsfd, &state);
+			if (FD_ISSET(telfd, &fds))
+				handle_telemetry(telfd, &state);
 		}
-
-		if (FD_ISSET(tncfd, &fds))
-			handle_incoming_packet(tncfd, &state);
-		if (FD_ISSET(gpsfd, &fds))
-			handle_gps_data(gpsfd, &state);
-		if (FD_ISSET(telfd, &fds))
-			handle_telemetry(telfd, &state);
 
 		beacon(tncfd, &state);
 		fflush(NULL);
