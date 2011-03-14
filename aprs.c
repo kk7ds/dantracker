@@ -124,7 +124,7 @@ const char *direction(double degrees)
 #define DEG2RAD(x) (x*(PI/180))
 #define RAD2DEG(x) (x/(PI/180))
 
-double get_direction(double fLng, double fLat, double tLng, double tLat)
+double get_direction(double tLng, double tLat, double fLng, double fLat)
 {
 	double rads;
 	int result;
