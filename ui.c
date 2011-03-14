@@ -11,9 +11,13 @@
 #define BG_COLOR "black"
 #define FG_COLOR_TEXT "white"
 
+#define FILL_RED   0xFF0000FF
+#define FILL_GREEN 0x00FF00FF
+
 enum {
 	TYPE_TEXT_LABEL,
 	TYPE_IMAGE,
+	TYPE_INDICATOR,
 	TYPE_MAX,
 };
 
@@ -27,9 +31,13 @@ struct named_element {
 struct layout {
 	GtkWidget *window;
 	GtkWidget *fixed;
+
 	GtkWidget *sep1;
 	GtkWidget *sep2;
 	GtkWidget *sep3;
+
+	GtkWidget *tx;
+	GtkWidget *rx;
 
 	unsigned int max;
 	unsigned int nxt;
@@ -40,6 +48,8 @@ struct element_layout {
 	const char *name;
 	int x;
 	int y;
+	int height;
+	int width;
 };
 
 GdkPixbuf *aprs_pri_img;
@@ -83,6 +93,11 @@ struct element_layout telemetry_elements[] = {
 	{"T_VOLTAGE",  30, 350},
 	{"T_TEMP1",   150, 350},
 	{NULL,          0,   0}
+};
+
+struct element_layout indicator_elements[] = {
+	{"I_RX",       0,   0, 110},
+	{"I_TX",       0, 250, 340},
 };
 
 struct named_element *get_element(struct layout *l, const char *name)
@@ -201,6 +216,39 @@ int make_bars(struct layout *l, const char *name)
 	gtk_widget_show(e->widget);
 }
 
+int hide_indicator(GtkWidget *widget)
+{
+	gtk_widget_hide(widget);
+
+	return FALSE; /* Don't run me again */
+}
+
+int update_indicator(struct named_element *e, const char *value)
+{
+	int delay = atoi(value);
+
+	gtk_widget_show(e->widget);
+	g_timeout_add(delay, hide_indicator, e->widget);
+}
+
+int make_indicator(struct layout *l, const char *name, int color, int height)
+{
+	struct named_element *e = &l->elements[l->nxt++];
+	GdkPixbuf *area;
+
+	e->name = name;
+	e->type = TYPE_INDICATOR;
+	e->widget = gtk_image_new();
+	e->update_fn = update_indicator;
+
+	area = gdk_pixbuf_new(GDK_COLORSPACE_RGB, 0, 8, 720, height);
+	gdk_pixbuf_fill(area, color);
+	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), area);
+
+	/* Don't show until asked, unless testing */
+	//gtk_widget_show(e->widget);
+}
+
 int put_widgets(struct layout *l, struct element_layout *layouts)
 {
 	int i;
@@ -265,6 +313,14 @@ int make_telemetry(struct layout *l)
 	put_widgets(l, telemetry_elements);
 }
 
+int make_indicators(struct layout *l)
+{
+	make_indicator(l, "I_TX", FILL_RED, 90);
+	make_indicator(l, "I_RX", FILL_GREEN, 110);
+
+	put_widgets(l, indicator_elements);
+}
+
 int make_window(struct layout *l)
 {
 	GdkColor color = {0, 0, 0};
@@ -287,6 +343,7 @@ int make_window(struct layout *l)
 	window = gtk_widget_get_window(GTK_WIDGET(l->window));
 	gdk_window_set_cursor(window, cursor);
 
+	make_indicators(l);
 	make_aprs_info(l);
 	make_aprs_list(l);
 	make_gps_info(l);

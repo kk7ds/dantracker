@@ -356,6 +356,8 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 
 	snprintf(buf, sizeof(buf), "%c%c", fap->symbol_table, fap->symbol_code);
 	set_value("AI_ICON", buf);
+
+	set_value("I_RX", "1000");
 }
 
 int stored_packet_desc(fap_packet_t *fap, int index,
@@ -1148,6 +1150,8 @@ int beacon(int fd, struct state *state)
 
 	ret = write(fd, buf, len);
 
+	set_value("I_TX", "1000");
+
 	return 0;
 }
 
@@ -1529,7 +1533,7 @@ int main(int argc, char **argv)
 		if (STREQ(state.conf.gps_type, "static"))
 			fake_gps_data(&state);
 
-		ret = select(telfd+1, &fds, NULL, NULL, &tv);
+		ret = select(100, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
 			perror("select");
 			continue;
