@@ -308,12 +308,14 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 	char buf[512];
 	static char last_callsign[10] = "";
 	int isnew = 1;
-	char *via = "Direct";
+	char via[32] = "Direct";
 	int i;
 
 	for (i = 0; i < fap->path_len; i++)
 		if (strchr(fap->path[i], '*'))
-			via = fap->path[i];
+			strcpy(via, fap->path[i]);
+	if (strchr(via, '*'))
+		*strchr(via, '*') = 0; /* Nuke the asterisk */
 
 	if (STREQ(fap->src_callsign, last_callsign))
 		isnew = 1;
