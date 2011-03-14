@@ -948,7 +948,7 @@ char *choose_data(struct state *state, char *req_icon)
 		    (!HAS_BEEN(state->tel.last_tel, 30))) {
 			*req_icon = '_';
 			asprintf(&data,
-				 ".../...g...t%03.0fr...p...P...P...h..b.....%s",
+				 ".../...t%03.0f%s",
 				 state->tel.temp1,
 				 comment);
 			break;
@@ -1190,6 +1190,7 @@ int fake_gps_data(struct state *state)
 	state->mypos.sats = 0; /* We may claim qual=1, but no sats */
 
 	state->last_gps_data = time(NULL);
+	state->tel.last_tel = time(NULL);
 
 	if ((time(NULL) - state->last_gps_update) > 3) {
 		display_gps_info(state);
