@@ -163,7 +163,9 @@ int update_icon(struct named_element *e, const char *value)
 	int y = (20 + 1) * APRS_IMG_MULT * (index / 16);
 	GdkPixbuf *source = value[0] == '\\' ? aprs_sec_img : aprs_pri_img;
 
-	icon = gdk_pixbuf_new_subpixbuf(source, x, y,
+	icon = gdk_pixbuf_new_subpixbuf(source,
+					x + APRS_IMG_MULT,
+					y + APRS_IMG_MULT,
 					20 * APRS_IMG_MULT,
 					20 * APRS_IMG_MULT);
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
@@ -335,6 +337,7 @@ int make_window(struct layout *l)
 	gtk_container_add(GTK_CONTAINER(l->window), l->fixed);
 	gtk_widget_show(l->fixed);
 
+	gdk_color_parse(BG_COLOR, &color);
 	gtk_widget_modify_bg(l->window, GTK_STATE_NORMAL, &color);
 	gtk_window_maximize(GTK_WINDOW(l->window));
 
