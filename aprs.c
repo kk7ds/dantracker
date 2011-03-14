@@ -476,7 +476,10 @@ int update_mybeacon_status(struct state *state)
 	snprintf(buf, sizeof(buf), "%i", count / 2);
 	set_value("G_SIGBARS", buf);
 
-	snprintf(buf, sizeof(buf), "%lu sec ago", delta);
+	if (state->last_beacon)
+		snprintf(buf, sizeof(buf), "%lu sec ago", delta);
+	else
+		snprintf(buf, sizeof(buf), "Never");
 	set_value("G_LASTBEACON", buf);
 }
 
