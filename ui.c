@@ -216,8 +216,9 @@ int make_bars(struct layout *l, const char *name)
 	gtk_widget_show(e->widget);
 }
 
-int hide_indicator(GtkWidget *widget)
+int hide_indicator(void *data)
 {
+	GtkWidget *widget = data;
 	gtk_widget_hide(widget);
 
 	return FALSE; /* Don't run me again */
