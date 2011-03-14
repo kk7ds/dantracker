@@ -142,6 +142,20 @@ double get_direction(double tLng, double tLat, double fLng, double fLat)
 	return (result + 360) % 360;
 }
 
+char *format_time(time_t t)
+{
+	static char str[32];
+
+	if (t > 3600)
+		snprintf(str, sizeof(str), "%luh%lum", t / 3600, t % 3600);
+	else if (t > 60)
+		snprintf(str, sizeof(str), "%lum%lus", t / 60, t % 60);
+	else
+		snprintf(str, sizeof(str), "%lu sec", t);
+
+	return str;
+}
+
 int get_packet(int fd, char *buf, unsigned int *len)
 {
 	unsigned char byte = 0x00;
@@ -479,7 +493,7 @@ int update_mybeacon_status(struct state *state)
 	set_value("G_SIGBARS", buf);
 
 	if (state->last_beacon)
-		snprintf(buf, sizeof(buf), "%lu sec ago", delta);
+		snprintf(buf, sizeof(buf), "%s ago", format_time(delta));
 	else
 		snprintf(buf, sizeof(buf), "Never");
 	set_value("G_LASTBEACON", buf);
@@ -1103,7 +1117,7 @@ int should_beacon(struct state *state)
 		if (req <= 0)
 			strcpy(tmp, reason);
 		else
-			sprintf(tmp, "Every %lu sec", req);
+			sprintf(tmp, "Every %s", format_time(req));
 		set_value("G_REASON", tmp);
 	}
 
