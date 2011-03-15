@@ -1075,6 +1075,7 @@ int should_beacon(struct state *state)
 
 	/* Never when we aren't getting data anymore */
 	if (HAS_BEEN(state->last_gps_data, 30)) {
+		state->mypos.qual = state->mypos.sats = 0;
 		reason = "NODATA";
 		goto out;
 	}
