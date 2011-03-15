@@ -50,7 +50,7 @@ int set_value_to(struct sockaddr *dest, unsigned int dest_len,
 		goto out;
 	}
 
-	printf("Sent: %s=%s (%i: %i)\n", name, value, len, ret);
+	//printf("Sent: %s=%s (%i: %i)\n", name, value, len, ret);
  out:
 	close(sock);
 	free(msg);
