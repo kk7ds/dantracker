@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <arpa/inet.h>
 
 #include <gtk/gtk.h>
 #include <pango/pango.h>
@@ -367,7 +368,7 @@ int make_window(struct layout *l)
 	gtk_fixed_put(GTK_FIXED(l->fixed), l->sep3, 0, 340);
 }
 
-int server_setup()
+int server_setup_unix()
 {
 	int sock;
 	struct sockaddr_un sockaddr;
@@ -390,67 +391,54 @@ int server_setup()
 	return sock;
 }
 
+int server_setup_inet()
+{
+	int sock;
+	struct sockaddr_in sockaddr;
+
+	sockaddr.sin_family = AF_INET;
+	sockaddr.sin_addr.s_addr = 0;
+	sockaddr.sin_port = htons(SOCKPORT);
+
+	sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sock < 0) {
+		perror("socket");
+		return -errno;
+	}
+
+	if (bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr))) {
+		perror("bind");
+		return -errno;
+	}
+
+	return sock;
+}
+
 gboolean server_handle(GIOChannel *source, GIOCondition cond, gpointer user)
 {
 	int fd;
 	struct layout *l = (void *)user;
 	struct named_element *e;
-	struct ui_msg msg;
+	struct ui_msg *msg;
 	int ret;
-	char *name = NULL;
-	char *valu = NULL;
 
 	fd = g_io_channel_unix_get_fd(source);
 
-	ret = read(fd, &msg, sizeof(msg));
-	if (ret != sizeof(msg)) {
-		printf("Failed to read message (%i != %i)\n", ret, sizeof(msg));
-		goto out;
+	ret = get_msg(fd, &msg);
+	if (ret < 0) {
+		printf("Failed to receive message: %s\n", strerror(-ret));
+		return TRUE;
 	}
 
-	if (msg.name_value.name_len) {
-		name = calloc(1, msg.name_value.name_len + 1);
-		if (!name) {
-			printf("Can't alloc %i\n", msg.name_value.name_len);
-			goto out;
-		}
-
-		ret = read(fd, name, msg.name_value.name_len);
-		if (ret != msg.name_value.name_len) {
-			printf("Failed to read name\n");
-			goto out;
-		}
-	}
-
-	if (msg.name_value.valu_len) {
-		valu = calloc(1, msg.name_value.valu_len + 1);
-		if (!valu) {
-			printf("Can't alloc %i\n", msg.name_value.valu_len);
-			goto out;
-		}
-
-		ret = read(fd, valu, msg.name_value.valu_len);
-		if (ret != msg.name_value.valu_len) {
-			printf("Failed to read value\n");
-			goto out;
-		}
-	} else if (name)
-		valu = strdup("");
-
-	if (!name)
-		goto out;
-
-	e = get_element(l, name);
+	e = get_element(l, get_msg_name(msg));
 	if (!e) {
-		printf("Unknown element `%s'\n", name);
+		printf("Unknown element `%s'\n", get_msg_name(msg));
 		goto out;
 	}
 
-	//printf("Setting %s -> %s\n", name, valu);
-	e->update_fn(e, valu);
+	e->update_fn(e, get_msg_valu(msg));
  out:
-	free(name);
-	free(valu);
+	free(msg);
 
 	return TRUE;
 }
@@ -461,7 +449,10 @@ int server_loop(struct layout *l)
 	GIOChannel *channel;
 	guint id;
 
-	sock = server_setup();
+	if (getenv("INET"))
+		sock = server_setup_inet();
+	else
+		sock = server_setup_unix();
 	if (sock < 0)
 		return sock;
 

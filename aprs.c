@@ -5,12 +5,15 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <time.h>
 #include <math.h>
 #include <errno.h>
 #include <termios.h>
 #include <getopt.h>
+#include <netdb.h>
 
 #include <fap.h>
 #include <iniparser.h>
@@ -83,6 +86,7 @@ struct state {
 		double static_lat, static_lon, static_alt;
 		double static_spd, static_crs;
 
+		struct sockaddr display_to;
 	} conf;
 
 	struct posit {
@@ -137,6 +141,13 @@ const char *direction(double degrees)
 #define PI 3.14159265
 #define DEG2RAD(x) (x*(PI/180))
 #define RAD2DEG(x) (x/(PI/180))
+
+int ui_send(struct state *state, const char *name, const char *value)
+{
+	return set_value_to(&state->conf.display_to,
+			    sizeof(state->conf.display_to),
+			    name, value);
+}
 
 double get_direction(double fLng, double fLat, double tLng, double tLat)
 {
@@ -211,7 +222,7 @@ int get_packet(int fd, char *buf, unsigned int *len)
 
 #define TZ_OFFSET (-8)
 
-void display_wx(fap_packet_t *_fap)
+void display_wx(struct state *state, fap_packet_t *_fap)
 {
 	fap_wx_report_t *fap = _fap->wx_report;
 	char *wind = NULL;
@@ -252,7 +263,7 @@ void display_wx(fap_packet_t *_fap)
 		 rain ? rain : "",
 		 humid ? humid : "");
 
-	set_value("AI_COMMENT", report);
+	ui_send(state, "AI_COMMENT", report);
 
 	/* Comment is used for larger WX report, so report the
 	 * comment (if any) in the smaller course field
@@ -262,9 +273,9 @@ void display_wx(fap_packet_t *_fap)
 
 		strncpy(buf, _fap->comment, _fap->comment_len);
 		buf[_fap->comment_len] = 0;
-		set_value("AI_COURSE", buf);
+		ui_send(state, "AI_COURSE", buf);
 	} else
-		set_value("AI_COURSE", "");
+		ui_send(state, "AI_COURSE", "");
 
 	free(report);
 	free(pres);
@@ -274,13 +285,13 @@ void display_wx(fap_packet_t *_fap)
 	free(wind);
 }
 
-void display_telemetry(fap_telemetry_t *fap)
+void display_telemetry(struct state *state, fap_telemetry_t *fap)
 {
-	set_value("AI_COURSE", "(Telemetry)");
-	set_value("AI_COMMENT", "");
+	ui_send(state, "AI_COURSE", "(Telemetry)");
+	ui_send(state, "AI_COMMENT", "");
 }
 
-void display_phg(fap_packet_t *fap)
+void display_phg(struct state *state, fap_packet_t *fap)
 {
 	int power, gain, dir;
 	char height;
@@ -290,7 +301,7 @@ void display_phg(fap_packet_t *fap)
 	ret = sscanf(fap->phg, "%1d%c%1d%1d",
 		     &power, &height, &gain, &dir);
 	if (ret != 4) {
-		set_value("AI_COURSE", "(Broken PHG)");
+		ui_send(state, "AI_COURSE", "(Broken PHG)");
 		return;
 	}
 
@@ -299,18 +310,18 @@ void display_phg(fap_packet_t *fap)
 		 pow(2, height - '0') * 10,
 		 gain,
 		 dir ? direction(dir) : "omni");
-	set_value("AI_COMMENT", buf);
+	ui_send(state, "AI_COMMENT", buf);
 	free(buf);
 
 	if (fap->comment) {
 		buf = strndup(fap->comment, fap->comment_len);
-		set_value("AI_COURSE", buf);
+		ui_send(state, "AI_COURSE", buf);
 		free(buf);
 	} else
-		set_value("AI_COURSE", "");
+		ui_send(state, "AI_COURSE", "");
 }
 
-void display_posit(fap_packet_t *fap, int isnew)
+void display_posit(struct state *state, fap_packet_t *fap, int isnew)
 {
 	char buf[512];
 
@@ -318,27 +329,28 @@ void display_posit(fap_packet_t *fap, int isnew)
 		snprintf(buf, sizeof(buf), "%.0f MPH %2s",
 			 KPH_TO_MPH(*fap->speed),
 			 direction(*fap->course));
-		set_value("AI_COURSE", buf);
+		ui_send(state, "AI_COURSE", buf);
 	} else if (isnew)
-		set_value("AI_COURSE", "");
+		ui_send(state, "AI_COURSE", "");
 
 	if (fap->type && (*fap->type == fapSTATUS)) {
 		strncpy(buf, fap->status, fap->status_len);
 		buf[fap->status_len] = 0;
-		set_value("AI_COMMENT", buf);
+		ui_send(state, "AI_COMMENT", buf);
 	} else if (fap->comment_len) {
 		strncpy(buf, fap->comment, fap->comment_len);
 		buf[fap->comment_len] = 0;
-		set_value("AI_COMMENT", buf);
+		ui_send(state, "AI_COMMENT", buf);
 	} else if (isnew)
-		set_value("AI_COMMENT", "");
+		ui_send(state, "AI_COMMENT", "");
 }
 
-void display_dist_and_dir(fap_packet_t *fap, double mylat, double mylon)
+void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 {
 	char buf[512];
 	char via[32] = "Direct";
 	int i;
+	struct posit *mypos = MYPOS(state);
 
 	for (i = 0; i < fap->path_len; i++)
 		if (strchr(fap->path[i], '*'))
@@ -348,54 +360,55 @@ void display_dist_and_dir(fap_packet_t *fap, double mylat, double mylon)
 
 	if (fap->latitude && fap->longitude) {
 		snprintf(buf, sizeof(buf), "%5.1fmi %2s <small>via %s</small>",
-			 KPH_TO_MPH(fap_distance(mylon, mylat,
+			 KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
 						 *fap->longitude,
 						 *fap->latitude)),
-			 direction(get_direction(mylon, mylat,
+			 direction(get_direction(mypos->lon, mypos->lat,
 						 *fap->longitude,
 						 *fap->latitude)),
 			 via);
-		set_value("AI_DISTANCE", buf);
+		ui_send(state, "AI_DISTANCE", buf);
 	} else if (fap->latitude && fap->longitude && fap->altitude) {
 		snprintf(buf, 512, "%5.1fmi %2s (%4.0f ft)",
-			 KPH_TO_MPH(fap_distance(mylon, mylat,
+			 KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
 						 *fap->longitude,
 						 *fap->latitude)),
-			 direction(get_direction(mylon, mylat,
+			 direction(get_direction(mypos->lon, mypos->lat,
 						 *fap->longitude,
 						 *fap->latitude)),
 			 M_TO_FT(*fap->altitude));
-		set_value("AI_DISTANCE", buf);
+		ui_send(state, "AI_DISTANCE", buf);
 	} else
-		set_value("AI_DISTANCE", "");
+		ui_send(state, "AI_DISTANCE", "");
 }
 
-void display_packet(fap_packet_t *fap, double mylat, double mylon)
+void display_packet(struct state *state, fap_packet_t *fap)
 {
 	char buf[512];
 	static char last_callsign[10] = "";
 	int isnew = 1;
+	struct posit *mypos = MYPOS(state);
 
 	if (STREQ(fap->src_callsign, last_callsign))
 		isnew = 1;
 
-	set_value("AI_CALLSIGN", fap->src_callsign);
+	ui_send(state, "AI_CALLSIGN", fap->src_callsign);
 	strncpy(last_callsign, fap->src_callsign, 9);
 	last_callsign[9] = 0;
 
-	display_dist_and_dir(fap, mylat, mylon);
+	display_dist_and_dir(state, fap);
 
 	if (fap->wx_report)
-		display_wx(fap);
+		display_wx(state, fap);
 	else if (fap->telemetry)
-		display_telemetry(fap->telemetry);
+		display_telemetry(state, fap->telemetry);
 	else if (fap->phg)
-		display_phg(fap);
+		display_phg(state, fap);
 	else
-		display_posit(fap, isnew);
+		display_posit(state, fap, isnew);
 
 	snprintf(buf, sizeof(buf), "%c%c", fap->symbol_table, fap->symbol_code);
-	set_value("AI_ICON", buf);
+	ui_send(state, "AI_ICON", buf);
 }
 
 int stored_packet_desc(fap_packet_t *fap, int index,
@@ -427,9 +440,7 @@ int update_packets_ui(struct state *state)
 	struct posit *mypos = MYPOS(state);
 
 	if (state->recent[state->recent_idx])
-		display_dist_and_dir(state->recent[state->recent_idx],
-				     mypos->lat,
-				     mypos->lon);
+		display_dist_and_dir(state, state->recent[state->recent_idx]);
 
 	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
 		fap_packet_t *p = state->recent[j % KEEP_PACKETS];
@@ -442,7 +453,7 @@ int update_packets_ui(struct state *state)
 					   buf, sizeof(buf));
 		else
 			sprintf(buf, "%i:", i);
-		set_value(name, buf);
+		ui_send(state, name, buf);
 	}
 
 	return 0;
@@ -518,13 +529,13 @@ int update_mybeacon_status(struct state *state)
 		count += (quality >> i) & 0x01;
 
 	snprintf(buf, sizeof(buf), "%i", count / 2);
-	set_value("G_SIGBARS", buf);
+	ui_send(state, "G_SIGBARS", buf);
 
 	if (state->last_beacon)
 		snprintf(buf, sizeof(buf), "%s ago", format_time(delta));
 	else
 		snprintf(buf, sizeof(buf), "Never");
-	set_value("G_LASTBEACON", buf);
+	ui_send(state, "G_LASTBEACON", buf);
 }
 
 int handle_incoming_packet(int fd, struct state *state)
@@ -545,13 +556,13 @@ int handle_incoming_packet(int fd, struct state *state)
 	printf("%s\n", packet);
 	fap = fap_parseaprs(packet, len, 1);
 	if (!fap->error_code) {
-		display_packet(fap, mypos->lat, mypos->lon);
+		display_packet(state, fap);
 		store_packet(state, fap);
 		if (STREQ(fap->src_callsign, state->mycall)) {
 			state->digi_quality |= 1;
 			update_mybeacon_status(state);
 		}
-		set_value("I_RX", "1000");
+		ui_send(state, "I_RX", "1000");
 	}
 
 	return 0;
@@ -729,7 +740,7 @@ int display_gps_info(struct state *state)
 		hour, min, sec,
 		status,
 		mypos->sats);
-	set_value("G_LATLON", buf);
+	ui_send(state, "G_LATLON", buf);
 
 	if (mypos->speed > 1.0)
 		sprintf(buf, "%.0f MPH %2s, Alt %.0f ft",
@@ -738,9 +749,9 @@ int display_gps_info(struct state *state)
 			mypos->alt);
 	else
 		sprintf(buf, "Stationary, Alt %.0f ft", mypos->alt);
-	set_value("G_SPD", buf);
+	ui_send(state, "G_SPD", buf);
 
-	set_value("G_MYCALL", state->mycall);
+	ui_send(state, "G_MYCALL", state->mycall);
 
 }
 
@@ -872,10 +883,10 @@ int handle_telemetry(int fd, struct state *state)
 	}
 
 	snprintf(_buf, sizeof(_buf), "%.1fV", state->tel.voltage);
-	set_value("T_VOLTAGE", _buf);
+	ui_send(state, "T_VOLTAGE", _buf);
 
 	snprintf(_buf, sizeof(_buf), "%.0fF", state->tel.temp1);
-	set_value("T_TEMP1", _buf);
+	ui_send(state, "T_TEMP1", _buf);
 
 	state->tel.last_tel = time(NULL);
 
@@ -1182,7 +1193,7 @@ int should_beacon(struct state *state)
 			strcpy(tmp, reason);
 		else
 			sprintf(tmp, "Every %s", format_time(req));
-		set_value("G_REASON", tmp);
+		ui_send(state, "G_REASON", tmp);
 	}
 
 	if (req == 0) {
@@ -1233,7 +1244,7 @@ int beacon(int fd, struct state *state)
 
 	ret = write(fd, buf, len);
 
-	set_value("I_TX", "1000");
+	ui_send(state, "I_TX", "1000");
 
 	return 0;
 }
@@ -1343,6 +1354,29 @@ int serial_open(const char *device, int baudrate)
 	return fd;
 }
 
+int lookup_host(struct state *state, const char *hostname)
+{
+	struct hostent *host;
+	struct sockaddr_in *sa = (struct sockaddr_in *)&state->conf.display_to;
+
+	host = gethostbyname(hostname);
+	if (!host) {
+		perror(hostname);
+		return -errno;
+	}
+
+	if (host->h_length < 1) {
+		fprintf(stderr, "No address for %s\n", hostname);
+		return -EINVAL;
+	}
+
+	sa->sin_family = AF_INET;
+	sa->sin_port = htons(SOCKPORT);
+	memcpy(&sa->sin_addr, host->h_addr_list[0], sizeof(sa->sin_addr));
+
+	return 0;
+}
+
 int parse_opts(int argc, char **argv, struct state *state)
 {
 	static struct option lopts[] = {
@@ -1352,8 +1386,13 @@ int parse_opts(int argc, char **argv, struct state *state)
 		{"testing",   0, 0,  1 },
 		{"verbose",   0, 0, 'v'},
 		{"conf",      1, 0, 'c'},
+		{"display",   1, 0, 'd'},
 		{NULL,        0, 0,  0 },
 	};
+
+	state->conf.display_to.sa_family = AF_UNIX;
+	strcpy(((struct sockaddr_un *)&state->conf.display_to)->sun_path,
+	       SOCKPATH);
 
 	while (1) {
 		int c;
@@ -1382,6 +1421,9 @@ int parse_opts(int argc, char **argv, struct state *state)
 			break;
 		case 'c':
 			state->conf.config = optarg;
+			break;
+		case 'd':
+			lookup_host(state, optarg);
 			break;
 		case '?':
 			printf("Unknown option\n");

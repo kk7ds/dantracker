@@ -19,7 +19,7 @@ aprs: aprs.c uiclient.o
 	$(CC) $(CFLAGS) $(APRS_CFLAGS) -lfap -liniparser -o $@ $^ -DBUILD=`cat .build` -DREVISION=\"`cat .revision`\"
 
 ui: ui.c uiclient.o
-	$(CC) $(CFLAGS) $(GTK_CFLAGS) $(GTK_LIBS) $(GLIB_CFLAGS) $(GLIB_LIBS) $< -o $@
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) $(GTK_LIBS) $(GLIB_CFLAGS) $(GLIB_LIBS) $^ -o $@
 
 uiclient: uiclient.c ui.h
 	$(CC) $(CFLAGS) -DMAIN $< -o $@
