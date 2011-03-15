@@ -83,7 +83,7 @@ struct element_layout gps_info_elements[] = {
 	{"G_SPD",     30, 280},
 
 	{"G_MYCALL",  30, 310},
-	{"G_LASTBEACON",   250, 310},
+	{"G_LASTBEACON",   200, 310},
 	{"G_REASON",       400, 310},
 	{"G_SIGBARS", 640, 310},
 	{NULL, 0, 0}
