@@ -60,6 +60,7 @@ struct state {
 		struct smart_beacon_point sb_low;
 		struct smart_beacon_point sb_high;
 		int course_change;
+		int after_stop;
 
 		unsigned int do_types;
 
@@ -106,6 +107,7 @@ struct state {
 	time_t last_gps_data;
 	time_t last_beacon;
 	time_t last_time_set;
+	time_t last_moving;
 
 	int comment_idx;
 	int other_beacon_idx;
@@ -795,6 +797,9 @@ int handle_gps_data(int fd, struct state *state)
 		state->gps_idx += ret;
 	}
 
+	if (state->mypos.speed > 0)
+		state->last_moving = time(NULL);
+
 	if (HAS_BEEN(state->last_gps_update, 1)) {
 		display_gps_info(state);
 		state->last_gps_update = time(NULL);
@@ -1089,6 +1094,15 @@ int should_beacon(struct state *state)
 		goto out;
 	}
 
+	/* If we have recently stopped moving, do one beacon */
+	if (state->last_moving &&
+	    HAS_BEEN(state->last_moving, state->conf.after_stop)) {
+		state->last_moving = 0;
+		req = -1;
+		reason = "STOPPED";
+		goto out;
+	}
+
 	/* If we're not moving at all, choose the "at rest" rate */
 	if (state->mypos.speed <= 1) {
 		req = state->conf.atrest_rate;
@@ -1214,6 +1228,8 @@ int fake_gps_data(struct state *state)
 	if (state->conf.testing) {
 		state->conf.static_lat -= 0.01;
 		state->conf.static_lon += 0.01;
+		if (state->conf.static_spd > 0)
+		    state->conf.static_spd -= 1;
 	}
 
 	state->mypos.lat = state->conf.static_lat;
@@ -1427,6 +1443,9 @@ int parse_ini(char *filename, struct state *state)
 	state->conf.course_change = iniparser_getint(ini,
 						     "beaconing:course_change",
 						     30);
+	state->conf.after_stop = iniparser_getint(ini,
+						  "beaconing:after_stop",
+						  180);
 
 	state->conf.static_lat = iniparser_getdouble(ini,
 						     "static:lat",
