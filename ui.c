@@ -11,8 +11,8 @@
 #define BG_COLOR "black"
 #define FG_COLOR_TEXT "white"
 
-#define FILL_RED   0xFF0000FF
-#define FILL_GREEN 0x00FF00FF
+#define FILL_RED   0x990000FF
+#define FILL_GREEN 0x006600FF
 
 enum {
 	TYPE_TEXT_LABEL,
@@ -198,8 +198,6 @@ int update_bars(struct named_element *e, const char *value)
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
 
 	/* FIXME: Free icon? */
-
-	printf("Updated bars to %i\n", bars);
 
 	free(path);
 
