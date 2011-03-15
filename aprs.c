@@ -17,6 +17,14 @@
 
 #include "ui.h"
 
+#ifndef BUILD
+#define BUILD 0
+#endif
+
+#ifndef REVISION
+#define REVISION "Unknown"
+#endif
+
 #define FEND  0xC0
 
 #define STREQ(x,y) (strcmp(x, y) == 0)
@@ -24,7 +32,10 @@
 
 #define HAS_BEEN(s, d) ((time(NULL) - s) > d)
 
+#define MYPOS(s) (&s->mypos[s->mypos_idx])
+
 #define KEEP_PACKETS 8
+#define KEEP_POSITS  8
 
 #define DO_TYPE_NONE 0
 #define DO_TYPE_WX   1
@@ -74,7 +85,7 @@ struct state {
 
 	} conf;
 
-	struct {
+	struct posit {
 		double lat;
 		double lon;
 		double alt;
@@ -86,7 +97,8 @@ struct state {
 		int dstamp;
 
 		double last_course;
-	} mypos;
+	} mypos[KEEP_POSITS];
+	int mypos_idx;
 
 	struct {
 		double temp1;
@@ -126,7 +138,7 @@ const char *direction(double degrees)
 #define DEG2RAD(x) (x*(PI/180))
 #define RAD2DEG(x) (x/(PI/180))
 
-double get_direction(double tLng, double tLat, double fLng, double fLat)
+double get_direction(double fLng, double fLat, double tLng, double tLat)
 {
 	double rads;
 	int result;
@@ -412,11 +424,12 @@ int update_packets_ui(struct state *state)
 	int i, j;
 	char name[] = "AL_00";
 	char buf[64];
+	struct posit *mypos = MYPOS(state);
 
 	if (state->recent[state->recent_idx])
 		display_dist_and_dir(state->recent[state->recent_idx],
-				     state->mypos.lat,
-				     state->mypos.lon);
+				     mypos->lat,
+				     mypos->lon);
 
 	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
 		fap_packet_t *p = state->recent[j % KEEP_PACKETS];
@@ -425,7 +438,7 @@ int update_packets_ui(struct state *state)
 		sprintf(name, "AL_%02i", i-1);
 		if (p)
 			stored_packet_desc(p, i,
-					   state->mypos.lat, state->mypos.lon,
+					   mypos->lat, mypos->lon,
 					   buf, sizeof(buf));
 		else
 			sprintf(buf, "%i:", i);
@@ -521,6 +534,7 @@ int handle_incoming_packet(int fd, struct state *state)
 	fap_packet_t *fap;
 	char err[128];
 	int ret;
+	struct posit *mypos = MYPOS(state);
 
 	memset(packet, 0, len);
 
@@ -531,7 +545,7 @@ int handle_incoming_packet(int fd, struct state *state)
 	printf("%s\n", packet);
 	fap = fap_parseaprs(packet, len, 1);
 	if (!fap->error_code) {
-		display_packet(fap, state->mypos.lat, state->mypos.lon);
+		display_packet(fap, mypos->lat, mypos->lon);
 		store_packet(state, fap);
 		if (STREQ(fap->src_callsign, state->mycall)) {
 			state->digi_quality |= 1;
@@ -592,6 +606,7 @@ int parse_gga(struct state *state, char *str)
 {
 	int num = 0;
 	char *field = strchr(str, ',');
+	struct posit *mypos = MYPOS(state);
 
 	//if (state->mypos.qual == 0)
 	//printf("GGA: %s\n", str);
@@ -601,30 +616,30 @@ int parse_gga(struct state *state, char *str)
 
 		switch (num) {
 		case 1:
-			state->mypos.tstamp = atoi(str);
+			mypos->tstamp = atoi(str);
 			break;
 		case 2:
-			state->mypos.lat = parse_lat(str);
+			mypos->lat = parse_lat(str);
 			break;
 		case 3:
 			if (*str == 'S')
-				state->mypos.lat *= -1;
+				mypos->lat *= -1;
 			break;
 		case 4:
-			state->mypos.lon = parse_lon(str);
+			mypos->lon = parse_lon(str);
 			break;
 		case 5:
 			if (*str == 'W')
-				state->mypos.lon *= -1;
+				mypos->lon *= -1;
 			break;
 		case 6:
-			state->mypos.qual = atoi(str);
+			mypos->qual = atoi(str);
 			break;
 		case 7:
-			state->mypos.sats = atoi(str);
+			mypos->sats = atoi(str);
 			break;
 		case 9:
-			state->mypos.alt = atof(str);
+			mypos->alt = atof(str);
 			break;
 		}
 
@@ -640,12 +655,13 @@ int parse_rmc(struct state *state, char *str)
 {
 	int num = 0;
 	char *field = strchr(str, ',');
+	struct posit *mypos;
+
+	state->mypos_idx = (state->mypos_idx + 1) % KEEP_POSITS;
+	mypos = MYPOS(state);
 
 	//if (state->mypos.qual == 0)
 	//printf("RMC: %s\n", str);
-
-	/* Save the current course for smart-beaconing detection */
-	state->mypos.last_course = state->mypos.course;
 
 	while (str && field) {
 		*field = 0;
@@ -656,13 +672,13 @@ int parse_rmc(struct state *state, char *str)
 				return 1;
 			break;
 		case 7:
-			state->mypos.speed = atof(str);
+			mypos->speed = atof(str);
 			break;
 		case 8:
-			state->mypos.course = atof(str);
+			mypos->course = atof(str);
 			break;
 		case 9:
-			state->mypos.dstamp = atoi(str);
+			mypos->dstamp = atoi(str);
 			break;
 		};
 
@@ -695,32 +711,33 @@ int parse_gps_string(struct state *state)
 int display_gps_info(struct state *state)
 {
 	char buf[512];
-	const char *status = state->mypos.qual != 0 ?
+	struct posit *mypos = MYPOS(state);
+	const char *status = mypos->qual != 0 ?
 		"Locked" :
-		"<span foreground='red'>INVALID</span>";
+		"<span background='red'>INVALID</span>";
 	int hour, min, sec;
 
-	hour = (state->mypos.tstamp / 10000) + TZ_OFFSET;
-	min = (state->mypos.tstamp / 100) % 100;
-	sec = state->mypos.tstamp % 100;
+	hour = (mypos->tstamp / 10000) + TZ_OFFSET;
+	min = (mypos->tstamp / 100) % 100;
+	sec = mypos->tstamp % 100;
 
 	if (hour < 0)
 		hour += 24;
 
 	sprintf(buf, "%7.5f %8.5f   Time %02i:%02i:%02i   %s: %2i sats",
-		state->mypos.lat, state->mypos.lon,
+		mypos->lat, mypos->lon,
 		hour, min, sec,
 		status,
-		state->mypos.sats);
+		mypos->sats);
 	set_value("G_LATLON", buf);
 
-	if (state->mypos.speed > 1.0)
+	if (mypos->speed > 1.0)
 		sprintf(buf, "%.0f MPH %2s, Alt %.0f ft",
-			KTS_TO_MPH(state->mypos.speed),
-			direction(state->mypos.course),
-			state->mypos.alt);
+			KTS_TO_MPH(mypos->speed),
+			direction(mypos->course),
+			mypos->alt);
 	else
-		sprintf(buf, "Stationary, Alt %.0f ft", state->mypos.alt);
+		sprintf(buf, "Stationary, Alt %.0f ft", mypos->alt);
 	set_value("G_SPD", buf);
 
 	set_value("G_MYCALL", state->mycall);
@@ -729,16 +746,17 @@ int display_gps_info(struct state *state)
 
 int set_time(struct state *state)
 {
-	time_t tstamp = state->mypos.tstamp;
-	time_t dstamp = state->mypos.dstamp;
+	struct posit *mypos = MYPOS(state);
+	time_t tstamp = mypos->tstamp;
+	time_t dstamp = mypos->dstamp;
 	char timestr[64];
 	int ret;
 	int hour, min, sec;
 	int day, mon, year;
 
-	if (state->mypos.qual == 0)
+	if (mypos->qual == 0)
 		return 1; /* No fix, no set */
-	else if (state->mypos.sats < 3)
+	else if (mypos->sats < 3)
 		return 1; /* Not enough sats, don't set */
 	else if (!HAS_BEEN(state->last_time_set, 120))
 		return 1; /* Too recent */
@@ -797,7 +815,7 @@ int handle_gps_data(int fd, struct state *state)
 		state->gps_idx += ret;
 	}
 
-	if (state->mypos.speed > 0)
+	if (MYPOS(state)->speed > 0)
 		state->last_moving = time(NULL);
 
 	if (HAS_BEEN(state->last_gps_update, 1)) {
@@ -885,9 +903,9 @@ char *get_subst(struct state *state, char *key)
 	else if (STREQ(key, "voltage"))
 		asprintf(&value, "%.1f", state->tel.voltage);
 	else if (STREQ(key, "sats"))
-		asprintf(&value, "%i", state->mypos.sats);
+		asprintf(&value, "%i", MYPOS(state)->sats);
 	else if (STREQ(key, "ver"))
-		asprintf(&value, "v0.1.%04i", BUILD);
+		asprintf(&value, "v0.1.%04i (%s)", BUILD, REVISION);
 	else if (STREQ(key, "time")) {
 		strftime(timestr, sizeof(timestr), "%H:%M:%S", &tm);
 		value = strdup(timestr);
@@ -910,7 +928,7 @@ char *process_subst(struct state *state, char *src)
 	char *ptr2;
 
 	/* FIXME: might overrun! */
-	str = malloc(strlen(src) * 2);
+	str = malloc(strlen(src) * 4);
 	if (!str)
 		return str;
 	str[0] = 0;
@@ -962,16 +980,17 @@ char *choose_data(struct state *state, char *req_icon)
 	char *data = NULL;
 	int cmt = state->comment_idx++ % state->conf.comments_count;
 	char *comment;
+	struct posit *mypos = MYPOS(state);
 
 	comment = process_subst(state, state->conf.comments[cmt]);
 	if (!comment)
 		comment = strdup("Error");
 
 	/* We're moving, so we do course/speed */
-	if (state->mypos.speed > 5) {
+	if (mypos->speed > 5) {
 		asprintf(&data, "%03.0f/%03.0f%s",
-			 state->mypos.course,
-			 state->mypos.speed,
+			 mypos->course,
+			 mypos->speed,
 			 comment);
 		goto out;
 	}
@@ -1016,19 +1035,20 @@ char *make_beacon(struct state *state, char *payload)
 	char _lon[16];
 	int ret;
 	char icon = state->conf.icon[1];
+	struct posit *mypos = MYPOS(state);
 
-	double lat = fabs(state->mypos.lat);
-	double lon = fabs(state->mypos.lon);
+	double lat = fabs(mypos->lat);
+	double lon = fabs(mypos->lon);
 
 	snprintf(_lat, 16, "%02.0f%05.2f%c",
 		 floor(lat),
 		 (lat - floor(lat)) * 60,
-		 state->mypos.lat > 0 ? 'N' : 'S');
+		 mypos->lat > 0 ? 'N' : 'S');
 
 	snprintf(_lon, 16, "%03.0f%05.2f%c",
 		 floor(lon),
 		 (lon - floor(lon)) * 60,
-		 state->mypos.lon > 0 ? 'E' : 'W');
+		 mypos->lon > 0 ? 'E' : 'W');
 
 	if (!payload)
 		payload = data = choose_data(state, &icon);
@@ -1051,16 +1071,29 @@ char *make_beacon(struct state *state, char *payload)
 	return packet;
 }
 
+float get_avg_course(struct state *state)
+{
+	float avg = 0;
+	int i;
+
+	for (i = 1; i < KEEP_POSITS; i++)
+		avg += state->mypos[(state->mypos_idx + i) % KEEP_POSITS].speed;
+
+	return avg / (KEEP_POSITS - 1);
+}
+
 int should_beacon(struct state *state)
 {
+	struct posit *mypos = MYPOS(state);
 	time_t delta = time(NULL) - state->last_beacon;
 	time_t sb_min_delta;
 	double sb_min_angle = 30;
-	double sb_course_change = fabs(state->mypos.last_course -
-				       state->mypos.course);
-	float speed_frac;
-	float d_speed = state->conf.sb_high.speed - state->conf.sb_low.speed;
-	float d_rate = state->conf.sb_low.int_sec - state->conf.sb_high.int_sec;
+	double speed_frac;
+	double d_speed = state->conf.sb_high.speed - state->conf.sb_low.speed;
+	double d_rate = state->conf.sb_low.int_sec -
+		state->conf.sb_high.int_sec;
+	double sb_course_change = fabs(get_avg_course(state) -
+				       mypos->course);
 
 	char *reason = NULL;
 
@@ -1074,7 +1107,7 @@ int should_beacon(struct state *state)
 		return 0;
 
 	/* The fractional penetration into the lo/hi zone */
-	speed_frac = (KTS_TO_MPH(state->mypos.speed) -
+	speed_frac = (KTS_TO_MPH(mypos->speed) -
 		      state->conf.sb_low.speed) / d_speed;
 
 	/* Determine the fractional that we are slower than the max */
@@ -1083,13 +1116,13 @@ int should_beacon(struct state *state)
 
 	/* Never when we aren't getting data anymore */
 	if (HAS_BEEN(state->last_gps_data, 30)) {
-		state->mypos.qual = state->mypos.sats = 0;
+		mypos->qual = mypos->sats = 0;
 		reason = "NODATA";
 		goto out;
 	}
 
 	/* Never when we don't have a fix */
-	if (state->mypos.qual == 0) {
+	if (mypos->qual == 0) {
 		reason = "NOLOCK";
 		goto out;
 	}
@@ -1104,7 +1137,7 @@ int should_beacon(struct state *state)
 	}
 
 	/* If we're not moving at all, choose the "at rest" rate */
-	if (state->mypos.speed <= 1) {
+	if (mypos->speed <= 1) {
 		req = state->conf.atrest_rate;
 		reason = "ATREST";
 		goto out;
@@ -1112,10 +1145,10 @@ int should_beacon(struct state *state)
 
 	/* SmartBeaconing: Course Change (only if moving) */
 	if ((sb_course_change > sb_min_angle) &&
-	    (KPH_TO_MPH(state->mypos.speed) > 2.0)) {
+	    (KPH_TO_MPH(mypos->speed) > 2.0)) {
 		printf("SB: Angle changed by %.0f\n",
-		       state->mypos.last_course - state->mypos.course);
-		state->mypos.last_course = state->mypos.course;
+		       get_avg_course(state) - mypos->course);
+		mypos->last_course = mypos->course;
 		reason = "COURSE";
 		req = -1;
 		goto out;
@@ -1124,14 +1157,14 @@ int should_beacon(struct state *state)
 	/* SmartBeaconing: Range-based variable speed beaconing */
 
 	/* If we're going below the low point, use that interval */
-	if (KTS_TO_MPH(state->mypos.speed) < state->conf.sb_low.speed) {
+	if (KTS_TO_MPH(mypos->speed) < state->conf.sb_low.speed) {
 		req = state->conf.sb_low.int_sec;
 		reason = "SLOWTO";
 		goto out;
 	}
 
 	/* If we're going above the high point, use that interval */
-	if (KTS_TO_MPH(state->mypos.speed) > state->conf.sb_high.speed) {
+	if (KTS_TO_MPH(mypos->speed) > state->conf.sb_high.speed) {
 		req = state->conf.sb_high.int_sec;
 		reason = "FASTTO";
 		goto out;
@@ -1225,6 +1258,8 @@ int redir_log()
 
 int fake_gps_data(struct state *state)
 {
+	struct posit *mypos = MYPOS(state);
+
 	if (state->conf.testing) {
 		state->conf.static_lat -= 0.01;
 		state->conf.static_lon += 0.01;
@@ -1232,16 +1267,18 @@ int fake_gps_data(struct state *state)
 		    state->conf.static_spd -= 1;
 	}
 
-	state->mypos.lat = state->conf.static_lat;
-	state->mypos.lon = state->conf.static_lon;
-	state->mypos.alt = state->conf.static_alt;
-	state->mypos.speed = state->conf.static_spd;
-	state->mypos.course = state->conf.static_crs;
+	mypos->lat = state->conf.static_lat;
+	mypos->lon = state->conf.static_lon;
+	mypos->alt = state->conf.static_alt;
+	mypos->speed = state->conf.static_spd;
+	mypos->course = state->conf.static_crs;
 
-	state->mypos.qual = 1;
-	state->mypos.sats = 0; /* We may claim qual=1, but no sats */
+	mypos->qual = 1;
+	mypos->sats = 0; /* We may claim qual=1, but no sats */
 
 	state->last_gps_data = time(NULL);
+	state->tel.temp1 = 75;
+	state->tel.voltage = 13.8;
 	state->tel.last_tel = time(NULL);
 
 	if ((time(NULL) - state->last_gps_update) > 3) {
@@ -1525,7 +1562,7 @@ int main(int argc, char **argv)
 	struct state state;
 	memset(&state, 0, sizeof(state));
 
-	printf("APRS v0.1.%04i\n", BUILD);
+	printf("APRS v0.1.%04i (%s)\n", BUILD, REVISION);
 
 	fap_init();
 
