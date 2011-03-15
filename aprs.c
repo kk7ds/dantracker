@@ -317,11 +317,9 @@ void display_posit(fap_packet_t *fap, int isnew)
 		set_value("AI_COMMENT", "");
 }
 
-void display_packet(fap_packet_t *fap, double mylat, double mylon)
+void display_dist_and_dir(fap_packet_t *fap, double mylat, double mylon)
 {
 	char buf[512];
-	static char last_callsign[10] = "";
-	int isnew = 1;
 	char via[32] = "Direct";
 	int i;
 
@@ -330,13 +328,6 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 			strcpy(via, fap->path[i]);
 	if (strchr(via, '*'))
 		*strchr(via, '*') = 0; /* Nuke the asterisk */
-
-	if (STREQ(fap->src_callsign, last_callsign))
-		isnew = 1;
-
-	set_value("AI_CALLSIGN", fap->src_callsign);
-	strncpy(last_callsign, fap->src_callsign, 9);
-	last_callsign[9] = 0;
 
 	if (fap->latitude && fap->longitude) {
 		snprintf(buf, sizeof(buf), "%5.1fmi %2s <small>via %s</small>",
@@ -358,8 +349,24 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 						 *fap->latitude)),
 			 M_TO_FT(*fap->altitude));
 		set_value("AI_DISTANCE", buf);
-	} else if (isnew)
+	} else
 		set_value("AI_DISTANCE", "");
+}
+
+void display_packet(fap_packet_t *fap, double mylat, double mylon)
+{
+	char buf[512];
+	static char last_callsign[10] = "";
+	int isnew = 1;
+
+	if (STREQ(fap->src_callsign, last_callsign))
+		isnew = 1;
+
+	set_value("AI_CALLSIGN", fap->src_callsign);
+	strncpy(last_callsign, fap->src_callsign, 9);
+	last_callsign[9] = 0;
+
+	display_dist_and_dir(fap, mylat, mylon);
 
 	if (fap->wx_report)
 		display_wx(fap);
@@ -372,8 +379,6 @@ void display_packet(fap_packet_t *fap, double mylat, double mylon)
 
 	snprintf(buf, sizeof(buf), "%c%c", fap->symbol_table, fap->symbol_code);
 	set_value("AI_ICON", buf);
-
-	set_value("I_RX", "1000");
 }
 
 int stored_packet_desc(fap_packet_t *fap, int index,
@@ -402,6 +407,11 @@ int update_packets_ui(struct state *state)
 	int i, j;
 	char name[] = "AL_00";
 	char buf[64];
+
+	if (state->recent[state->recent_idx])
+		display_dist_and_dir(state->recent[state->recent_idx],
+				     state->mypos.lat,
+				     state->mypos.lon);
 
 	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
 		fap_packet_t *p = state->recent[j % KEEP_PACKETS];
@@ -522,6 +532,7 @@ int handle_incoming_packet(int fd, struct state *state)
 			state->digi_quality |= 1;
 			update_mybeacon_status(state);
 		}
+		set_value("I_RX", "1000");
 	}
 
 	return 0;
@@ -785,6 +796,8 @@ int handle_gps_data(int fd, struct state *state)
 		display_gps_info(state);
 		state->last_gps_update = time(NULL);
 		set_time(state);
+		update_mybeacon_status(state);
+		update_packets_ui(state);
 	}
 
 	return 0;
@@ -1210,13 +1223,6 @@ int fake_gps_data(struct state *state)
 		display_gps_info(state);
 		state->last_gps_update = time(NULL);
 	}
-}
-
-int set_mycall(struct state *state, char *callsign)
-{
-	strcpy(state->mycall, callsign);
-
-	return 0;
 }
 
 int get_rate_const(int baudrate)
