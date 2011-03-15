@@ -149,7 +149,10 @@ char *format_time(time_t t)
 	if (t > 3600)
 		snprintf(str, sizeof(str), "%luh%lum", t / 3600, t % 3600);
 	else if (t > 60)
-		snprintf(str, sizeof(str), "%lum%lus", t / 60, t % 60);
+		if (t % 60)
+			snprintf(str, sizeof(str), "%lum%lus", t / 60, t % 60);
+		else
+			snprintf(str, sizeof(str), "%lu min", t / 60);
 	else
 		snprintf(str, sizeof(str), "%lu sec", t);
 
@@ -1208,6 +1211,11 @@ int redir_log()
 
 int fake_gps_data(struct state *state)
 {
+	if (state->conf.testing) {
+		state->conf.static_lat -= 0.01;
+		state->conf.static_lon += 0.01;
+	}
+
 	state->mypos.lat = state->conf.static_lat;
 	state->mypos.lon = state->conf.static_lon;
 	state->mypos.alt = state->conf.static_alt;
