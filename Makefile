@@ -16,8 +16,8 @@ all: $(TARGETS)
 uiclient.o: uiclient.c ui.h
 
 aprs: aprs.c uiclient.o
-	echo $$((`cat .build` + 1)) > .build
 	test -d .hg && hg id --id > .revision || true
+	echo $$((`cat .build` + 1)) > .build
 	$(CC) $(CFLAGS) $(APRS_CFLAGS) -lfap -liniparser -o $@ $^ -DBUILD=`cat .build` -DREVISION=\"`cat .revision`\"
 
 ui: ui.c uiclient.o
