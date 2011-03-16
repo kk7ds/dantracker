@@ -1,4 +1,4 @@
-CFLAGS += -g
+CFLAGS += -g -Wall
 APRS_CFLAGS = -Ilibfap-1.1/src
 APRS_CFLAGS += -Iiniparser/src
 GTK_CFLAGS = `pkg-config --cflags 'gtk+-2.0'`
@@ -9,7 +9,9 @@ GTK_LIBS = `pkg-config --libs 'gtk+-2.0'`
 
 DEST="root@beagle:carputer"
 
-all: aprs ui uiclient
+TARGETS = aprs ui uiclient fakegps
+
+all: $(TARGETS)
 
 uiclient.o: uiclient.c ui.h
 
@@ -24,8 +26,11 @@ ui: ui.c uiclient.o
 uiclient: uiclient.c ui.h
 	$(CC) $(CFLAGS) -DMAIN $< -o $@
 
+fakegps: fakegps.c
+	$(CC) $(CFLAGS) -lm -o $@ $<
+
 clean:
-	rm -f aprs ui uiclient *.o *~
+	rm -f $(TARGETS) *.o *~
 
 sync:
 	scp -r *.c *.h Makefile tools images .revision .build $(DEST)
