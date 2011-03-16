@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -391,7 +392,6 @@ void display_packet(struct state *state, fap_packet_t *fap)
 	char buf[512];
 	static char last_callsign[10] = "";
 	int isnew = 1;
-	struct posit *mypos = MYPOS(state);
 
 	if (STREQ(fap->src_callsign, last_callsign))
 		isnew = 1;
@@ -448,7 +448,6 @@ int update_packets_ui(struct state *state)
 
 	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
 		fap_packet_t *p = state->recent[j % KEEP_PACKETS];
-		double distance;
 
 		sprintf(name, "AL_%02i", i-1);
 		if (p)
@@ -540,6 +539,8 @@ int update_mybeacon_status(struct state *state)
 	else
 		snprintf(buf, sizeof(buf), "Never");
 	ui_send(state, "G_LASTBEACON", buf);
+
+	return 0;
 }
 
 int handle_incoming_packet(int fd, struct state *state)
@@ -547,9 +548,7 @@ int handle_incoming_packet(int fd, struct state *state)
 	char packet[512];
 	unsigned int len = sizeof(packet);
 	fap_packet_t *fap;
-	char err[128];
 	int ret;
-	struct posit *mypos = MYPOS(state);
 
 	memset(packet, 0, len);
 
@@ -757,6 +756,7 @@ int display_gps_info(struct state *state)
 
 	ui_send(state, "G_MYCALL", state->mycall);
 
+	return 0;
 }
 
 int set_time(struct state *state)
@@ -1100,7 +1100,6 @@ int should_beacon(struct state *state)
 	struct posit *mypos = MYPOS(state);
 	time_t delta = time(NULL) - state->last_beacon;
 	time_t sb_min_delta;
-	double sb_min_angle = 30;
 	double speed_frac;
 	double d_speed = state->conf.sb_high.speed - state->conf.sb_low.speed;
 	double d_rate = state->conf.sb_low.int_sec -
@@ -1299,6 +1298,8 @@ int fake_gps_data(struct state *state)
 		display_gps_info(state);
 		state->last_gps_update = time(NULL);
 	}
+
+	return 0;
 }
 
 int get_rate_const(int baudrate)
@@ -1474,7 +1475,6 @@ int parse_ini(char *filename, struct state *state)
 {
 	dictionary *ini;
 	char *tmp;
-	int ret;
 
 	ini = iniparser_load(filename);
 	if (ini == NULL)
@@ -1606,8 +1606,6 @@ int main(int argc, char **argv)
 	int tncfd;
 	int gpsfd;
 	int telfd;
-	double mylat = 45.525;
-	double mylon = -122.9164;
 	int i;
 
 	fd_set fds;

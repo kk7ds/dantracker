@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -184,6 +185,8 @@ int make_icon(struct layout *l, const char *name)
 	e->update_fn = update_icon;
 
 	gtk_widget_show(e->widget);
+
+	return 0;
 }
 
 int update_bars(struct named_element *e, const char *value)
@@ -215,6 +218,8 @@ int make_bars(struct layout *l, const char *name)
 	e->update_fn = update_bars;
 
 	gtk_widget_show(e->widget);
+
+	return 0;
 }
 
 int hide_indicator(void *data)
@@ -231,6 +236,8 @@ int update_indicator(struct named_element *e, const char *value)
 
 	gtk_widget_show(e->widget);
 	g_timeout_add(delay, hide_indicator, e->widget);
+
+	return 0;
 }
 
 int make_indicator(struct layout *l, const char *name, int color, int height)
@@ -249,6 +256,8 @@ int make_indicator(struct layout *l, const char *name, int color, int height)
 
 	/* Don't show until asked, unless testing */
 	//gtk_widget_show(e->widget);
+
+	return 0;
 }
 
 int put_widgets(struct layout *l, struct element_layout *layouts)
@@ -305,6 +314,8 @@ int make_gps_info(struct layout *l)
 	make_bars(l, "G_SIGBARS");
 
 	put_widgets(l, gps_info_elements);
+
+	return 0;
 }
 
 int make_telemetry(struct layout *l)
@@ -313,6 +324,8 @@ int make_telemetry(struct layout *l)
 	make_text_label(l, "T_TEMP1",  "", "Sans 18");
 
 	put_widgets(l, telemetry_elements);
+
+	return 0;
 }
 
 int make_indicators(struct layout *l)
@@ -321,6 +334,8 @@ int make_indicators(struct layout *l)
 	make_indicator(l, "I_RX", FILL_GREEN, 110);
 
 	put_widgets(l, indicator_elements);
+
+	return 0;
 }
 
 int make_window(struct layout *l)
@@ -366,6 +381,8 @@ int make_window(struct layout *l)
 	gtk_widget_set_size_request(l->sep3, 720, 10);
 	gtk_widget_show(l->sep3);
 	gtk_fixed_put(GTK_FIXED(l->fixed), l->sep3, 0, 340);
+
+	return 0;
 }
 
 int server_setup_unix()

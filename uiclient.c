@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +13,6 @@ int set_value_to(struct sockaddr *dest, unsigned int dest_len,
 {
 	int sock;
 	int ret;
-	struct sockaddr_un sockaddr;
 	struct ui_msg *msg;
 	int len;
 	int offset;
