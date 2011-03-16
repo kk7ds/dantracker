@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <time.h>
@@ -38,7 +39,7 @@
 #define MYPOS(s) (&s->mypos[s->mypos_idx])
 
 #define KEEP_PACKETS 8
-#define KEEP_POSITS  8
+#define KEEP_POSITS  4
 
 #define DO_TYPE_NONE 0
 #define DO_TYPE_WX   1
@@ -73,7 +74,8 @@ struct state {
 		int atrest_rate;
 		struct smart_beacon_point sb_low;
 		struct smart_beacon_point sb_high;
-		int course_change;
+		int course_change_min;
+		int course_change_slope;
 		int after_stop;
 
 		unsigned int do_types;
@@ -103,6 +105,8 @@ struct state {
 		double last_course;
 	} mypos[KEEP_POSITS];
 	int mypos_idx;
+
+	struct posit last_beacon_pos;
 
 	struct {
 		double temp1;
@@ -1082,15 +1086,13 @@ char *make_beacon(struct state *state, char *payload)
 	return packet;
 }
 
-float get_avg_course(struct state *state)
+double sb_course_change_thresh(struct state *state)
 {
-	float avg = 0;
-	int i;
+	double mph = KTS_TO_MPH(MYPOS(state)->speed);
+	double slope = state->conf.course_change_slope;
+	double min = state->conf.course_change_min;
 
-	for (i = 1; i < KEEP_POSITS; i++)
-		avg += state->mypos[(state->mypos_idx + i) % KEEP_POSITS].speed;
-
-	return avg / (KEEP_POSITS - 1);
+	return min + (slope / mph);
 }
 
 int should_beacon(struct state *state)
@@ -1103,8 +1105,8 @@ int should_beacon(struct state *state)
 	double d_speed = state->conf.sb_high.speed - state->conf.sb_low.speed;
 	double d_rate = state->conf.sb_low.int_sec -
 		state->conf.sb_high.int_sec;
-	double sb_course_change = fabs(get_avg_course(state) -
-				       mypos->course);
+	double sb_thresh = sb_course_change_thresh(state);
+	double sb_change = fabs(state->last_beacon_pos.course - mypos->course);
 
 	char *reason = NULL;
 
@@ -1155,11 +1157,9 @@ int should_beacon(struct state *state)
 	}
 
 	/* SmartBeaconing: Course Change (only if moving) */
-	if ((sb_course_change > sb_min_angle) &&
-	    (KPH_TO_MPH(mypos->speed) > 2.0)) {
-		printf("SB: Angle changed by %.0f\n",
-		       get_avg_course(state) - mypos->course);
-		mypos->last_course = mypos->course;
+	if ((sb_change > sb_thresh) && (KTS_TO_MPH(mypos->speed) > 2.0)) {
+		printf("SB: Angle changed by %.0f (>%.0f)\n",
+		       sb_change, sb_thresh);
 		reason = "COURSE";
 		req = -1;
 		goto out;
@@ -1246,6 +1246,8 @@ int beacon(int fd, struct state *state)
 
 	ui_send(state, "I_TX", "1000");
 
+	state->last_beacon_pos = state->mypos[state->mypos_idx];
+
 	return 0;
 }
 
@@ -1272,10 +1274,11 @@ int fake_gps_data(struct state *state)
 	struct posit *mypos = MYPOS(state);
 
 	if (state->conf.testing) {
-		state->conf.static_lat -= 0.01;
-		state->conf.static_lon += 0.01;
-		if (state->conf.static_spd > 0)
-		    state->conf.static_spd -= 1;
+		//state->conf.static_lat -= 0.01;
+		//state->conf.static_lon += 0.01;
+		//if (state->conf.static_spd > 0)
+		//    state->conf.static_spd -= 1;
+		state->conf.static_crs += 0.1;
 	}
 
 	mypos->lat = state->conf.static_lat;
@@ -1340,15 +1343,20 @@ int serial_open(const char *device, int baudrate)
 {
 	int fd;
 	int ret;
+	struct stat s;
 
 	fd = open(device, O_RDWR);
 	if (fd < 0)
 		return fd;
 
-	ret = serial_set_rate(fd, baudrate);
-	if (ret) {
-		close(fd);
-		fd = ret;
+	fstat(fd, &s);
+
+	if (S_ISCHR(s.st_mode)) {
+		ret = serial_set_rate(fd, baudrate);
+		if (ret) {
+			close(fd);
+			fd = ret;
+		}
 	}
 
 	return fd;
@@ -1519,9 +1527,12 @@ int parse_ini(char *filename, struct state *state)
 	state->conf.sb_high.int_sec = iniparser_getint(ini,
 						       "beaconing:max_rate",
 						       60);
-	state->conf.course_change = iniparser_getint(ini,
-						     "beaconing:course_change",
+	state->conf.course_change_min = iniparser_getint(ini,
+						     "beaconing:course_change_min",
 						     30);
+	state->conf.course_change_slope = iniparser_getint(ini,
+							   "beaconing:course_change_slope",
+							   255);
 	state->conf.after_stop = iniparser_getint(ini,
 						  "beaconing:after_stop",
 						  180);
