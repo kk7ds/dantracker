@@ -119,6 +119,7 @@ struct state {
 
 	char *mycall;
 
+	fap_packet_t *last_packet; /* In case we don't store it below */
 	fap_packet_t *recent[KEEP_PACKETS];
 	int recent_idx;
 
@@ -352,7 +353,7 @@ void display_posit(struct state *state, fap_packet_t *fap, int isnew)
 
 void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 {
-	char buf[512];
+	char buf[512] = "";
 	char via[32] = "Direct";
 	int i;
 	struct posit *mypos = MYPOS(state);
@@ -363,7 +364,9 @@ void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 	if (strchr(via, '*'))
 		*strchr(via, '*') = 0; /* Nuke the asterisk */
 
-	if (fap->latitude && fap->longitude) {
+	if (STREQ(fap->src_callsign, state->mycall))
+		snprintf(buf, sizeof(buf), "via %s", via);
+	else if (fap->latitude && fap->longitude)
 		snprintf(buf, sizeof(buf), "%5.1fmi %2s <small>via %s</small>",
 			 KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
 						 *fap->longitude,
@@ -372,8 +375,7 @@ void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 						 *fap->longitude,
 						 *fap->latitude)),
 			 via);
-		ui_send(state, "AI_DISTANCE", buf);
-	} else if (fap->latitude && fap->longitude && fap->altitude) {
+	else if (fap->latitude && fap->longitude && fap->altitude)
 		snprintf(buf, 512, "%5.1fmi %2s (%4.0f ft)",
 			 KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
 						 *fap->longitude,
@@ -382,9 +384,7 @@ void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 						 *fap->longitude,
 						 *fap->latitude)),
 			 M_TO_FT(*fap->altitude));
-		ui_send(state, "AI_DISTANCE", buf);
-	} else
-		ui_send(state, "AI_DISTANCE", "");
+	ui_send(state, "AI_DISTANCE", buf);
 }
 
 void display_packet(struct state *state, fap_packet_t *fap)
@@ -443,8 +443,8 @@ int update_packets_ui(struct state *state)
 	char buf[64];
 	struct posit *mypos = MYPOS(state);
 
-	if (state->recent[state->recent_idx])
-		display_dist_and_dir(state, state->recent[state->recent_idx]);
+	if (state->last_packet)
+		display_dist_and_dir(state, state->last_packet);
 
 	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
 		fap_packet_t *p = state->recent[j % KEEP_PACKETS];
@@ -560,6 +560,7 @@ int handle_incoming_packet(int fd, struct state *state)
 	fap = fap_parseaprs(packet, len, 1);
 	if (!fap->error_code) {
 		display_packet(state, fap);
+		state->last_packet = fap;
 		store_packet(state, fap);
 		if (STREQ(fap->src_callsign, state->mycall)) {
 			state->digi_quality |= 1;
