@@ -158,19 +158,22 @@ int ui_send(struct state *state, const char *name, const char *value)
 double get_direction(double fLng, double fLat, double tLng, double tLat)
 {
 	double rads;
-	int result;
+	double result;
 
 	fLng = DEG2RAD(fLng);
 	fLat = DEG2RAD(fLat);
 	tLng = DEG2RAD(tLng);
 	tLat = DEG2RAD(tLat);
 
-	rads = atan2(sin(fLng-tLng)*cos(tLat),
-		     cos(fLat)*sin(tLat)-sin(fLat)*cos(tLat)*cos(fLng-tLng));
+	rads = atan2(sin(tLng-fLng)*cos(tLat),
+		     cos(fLat)*sin(tLat)-sin(fLat)*cos(tLat)*cos(tLng-fLng));
 
 	result = RAD2DEG(rads);
 
-	return (result + 360) % 360;
+	if (result < 0)
+		return result + 360;
+	else
+		return result;
 }
 
 char *format_time(time_t t)
