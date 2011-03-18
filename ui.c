@@ -171,6 +171,7 @@ int update_icon(struct named_element *e, const char *value)
 					20 * APRS_IMG_MULT,
 					20 * APRS_IMG_MULT);
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
+	gdk_pixbuf_unref(icon);
 
 	return 0;
 }
@@ -200,8 +201,7 @@ int update_bars(struct named_element *e, const char *value)
 
 	icon = gdk_pixbuf_new_from_file(path, NULL);
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
-
-	/* FIXME: Free icon? */
+	gdk_pixbuf_unref(icon);
 
 	free(path);
 
@@ -253,6 +253,7 @@ int make_indicator(struct layout *l, const char *name, int color, int height)
 	area = gdk_pixbuf_new(GDK_COLORSPACE_RGB, 0, 8, 720, height);
 	gdk_pixbuf_fill(area, color);
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), area);
+	gdk_pixbuf_unref(area);
 
 	/* Don't show until asked, unless testing */
 	//gtk_widget_show(e->widget);
