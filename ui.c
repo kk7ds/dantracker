@@ -100,6 +100,7 @@ struct element_layout telemetry_elements[] = {
 struct element_layout indicator_elements[] = {
 	{"I_RX",       0,   0, 110},
 	{"I_TX",       0, 250, 340},
+	{NULL,         0,   0,   0}
 };
 
 struct named_element *get_element(struct layout *l, const char *name)
