@@ -999,22 +999,11 @@ char *choose_data(struct state *state, char *req_icon)
 	char *data = NULL;
 	int cmt = state->comment_idx++ % state->conf.comments_count;
 	char *comment;
-	struct posit *mypos = MYPOS(state);
 
 	comment = process_subst(state, state->conf.comments[cmt]);
 	if (!comment)
 		comment = strdup("Error");
 
-	/* We're moving, so we do course/speed */
-	if (mypos->speed > 5) {
-		asprintf(&data, "%03.0f/%03.0f%s",
-			 mypos->course,
-			 mypos->speed,
-			 comment);
-		goto out;
-	}
-
-	/* We're not moving, so choose a type */
 	switch (state->other_beacon_idx++ % 3) {
 	case DO_TYPE_WX:
 		if ((state->conf.do_types & DO_TYPE_WX) &&
@@ -1041,9 +1030,89 @@ char *choose_data(struct state *state, char *req_icon)
 		data = strdup(comment);
 		break;
 	}
- out:
+
 	free(comment);
 	return data;
+}
+
+char *make_mice_beacon(struct state *state)
+{
+	char *str = NULL;
+
+	struct posit *mypos = MYPOS(state);
+	int ldeg = fabs(floor(mypos->lat));
+	int Ldeg = fabs(floor(mypos->lon));
+	double lmin = (mypos->lat - ldeg) * 60.0;
+	double Lmin = (mypos->lon - Ldeg) * 60.0;
+	unsigned char north = mypos->lat > 0 ? 0x50 : 0x30;
+	unsigned char lonsc = fabs(mypos->lon) > 100 ? 0x50 : 0x30;
+	unsigned char west = mypos->lon > 0 ? 0x30 : 0x50;
+
+	unsigned char lon_deg;
+	unsigned char lon_min;
+	unsigned char lon_hun;
+
+	unsigned char spd_htk;
+	unsigned char spd_crs;
+	unsigned char crs_tud;
+
+	ldeg = floor(mypos->lat);
+	lmin = (mypos->lat - ldeg) * 60.0;
+	Ldeg = floor(fabs(mypos->lon));
+	Lmin = (fabs(mypos->lon) - Ldeg) * 60.0;
+
+	if (Ldeg <= 9)
+		lon_deg = Ldeg + 118;
+	else if (Ldeg <= 99)
+		lon_deg = Ldeg + 28;
+	else if (Ldeg <= 109)
+		lon_deg = Ldeg + 108;
+	else if (Ldeg <= 179)
+		lon_deg = (Ldeg - 100) + 28;
+	lon_min = Lmin > 10 ? floor(Lmin)+28 : floor(Lmin)+88;
+	lon_hun = ((int)floor(Lmin * 100) % 100) + 28;
+
+	spd_htk = (mypos->speed / 10) + 108;
+	spd_crs = 32 + \
+		(((int)mypos->speed % 10) * 10) + \
+		((int)mypos->course / 100);
+	crs_tud = ((int)mypos->course % 100) + 28;
+
+	asprintf(&str,
+		 "%s>%c%c%c%c%c%c,%s:`%c%c%c%c%c%c%c%c",
+		 state->mycall,
+		 (ldeg / 10) | 0x50,
+		 (ldeg % 10) | 0x30,
+		 ((int)floor(lmin) / 10) | 0x50,
+		 ((int)floor(lmin) % 10) | north,
+		 ((int)floor(lmin) * 10 % 10) | lonsc,
+		 ((int)floor(lmin) * 100 % 10) | west,
+		 state->conf.digi_path,
+		 lon_deg,
+		 lon_min,
+		 lon_hun,
+		 spd_htk,
+		 spd_crs,
+		 crs_tud,
+		 state->conf.icon[1],
+		 state->conf.icon[0]);
+
+	return str;
+}
+
+char *make_status_beacon(struct state *state)
+{
+	char *packet = NULL;
+	char icon;
+	char *data = choose_data(state, &icon);
+
+	asprintf(&packet,
+		 "%s>%s,%s:>%s",
+		 state->mycall, "APZDMS", state->conf.digi_path,
+		 data);
+	free(data);
+
+	return packet;
 }
 
 char *make_beacon(struct state *state, char *payload)
@@ -1055,6 +1124,7 @@ char *make_beacon(struct state *state, char *payload)
 	int ret;
 	char icon = state->conf.icon[1];
 	struct posit *mypos = MYPOS(state);
+	char course_speed[] = ".../...";
 
 	double lat = fabs(mypos->lat);
 	double lon = fabs(mypos->lon);
@@ -1069,17 +1139,26 @@ char *make_beacon(struct state *state, char *payload)
 		 (lon - floor(lon)) * 60,
 		 mypos->lon > 0 ? 'E' : 'W');
 
+	if (mypos->speed > 5)
+		snprintf(course_speed, sizeof(course_speed),
+			 "%03.0f/%03.0f",
+			 mypos->course,
+			 mypos->speed);
+	else
+		course_speed[0] = 0;
+
 	if (!payload)
 		payload = data = choose_data(state, &icon);
 
 	ret = asprintf(&packet,
-		       "%s>APZDMS,%s:!%s%c%s%c%s",
+		       "%s>APZDMS,%s:!%s%c%s%c%s%s",
 		       state->mycall,
 		       state->conf.digi_path,
 		       _lat,
 		       state->conf.icon[0],
 		       _lon,
 		       icon,
+		       course_speed,
 		       payload);
 
 	free(data);
@@ -1208,12 +1287,25 @@ int should_beacon(struct state *state)
 		return delta > req;
 }
 
+int send_beacon(int fd, char *packet)
+{
+	char buf[512];
+	int ret;
+	unsigned int len = sizeof(buf);
+
+	printf("Sending Packet: %s\n", packet);
+
+	ret = fap_tnc2_to_kiss(packet, strlen(packet), 0, buf, &len);
+	if (!ret) {
+		printf("Failed to make beacon KISS packet\n");
+		return 1;
+	}
+	return write(fd, buf, len) == len;
+}
+
 int beacon(int fd, struct state *state)
 {
 	char *packet;
-	char buf[512];
-	unsigned int len = sizeof(buf);
-	int ret;
 	static time_t max_beacon_check = 0;
 
 	/* Don't even check but every half-second */
@@ -1225,27 +1317,25 @@ int beacon(int fd, struct state *state)
 	if (!should_beacon(state))
 		return 0;
 
-	packet = make_beacon(state, NULL);
-	if (!packet) {
-		printf("Failed to make beacon TNC2 packet\n");
-		return 1;
-	}
-	printf("Sending Packet: %s\n", packet);
+	if (MYPOS(state)->speed > 5) {
+		/* Send a short MIC-E position beacon */
+		packet = make_mice_beacon(state);
+		send_beacon(fd, packet);
+		free(packet);
 
-	ret = fap_tnc2_to_kiss(packet, strlen(packet),
-			       0,
-			       buf, &len);
-	free(packet);
-	if (!ret) {
-		printf("Failed to make beacon KISS packet\n");
-		return 1;
+		/* Follow up with a status packet */
+		packet = make_status_beacon(state);
+		send_beacon(fd, packet);
+		free(packet);
+	} else {
+		packet = make_beacon(state, NULL);
+		send_beacon(fd, packet);
+		free(packet);
 	}
 
 	state->last_beacon = time(NULL);
 	state->digi_quality <<= 1;
 	update_mybeacon_status(state);
-
-	ret = write(fd, buf, len);
 
 	ui_send(state, "I_TX", "1000");
 
