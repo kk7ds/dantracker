@@ -502,7 +502,6 @@ int find_packet(struct state *state, fap_packet_t *fap)
 #define SWAP_VAL(new, old, value)				\
 	do {							\
 		if (old->value && !new->value) {		\
-			printf("Swapping %s\n", "##value");	\
 			new->value = old->value;		\
 			old->value = 0;				\
 		}						\
@@ -601,13 +600,21 @@ int handle_incoming_packet(int fd, struct state *state)
 	printf("%s\n", packet);
 	fap = fap_parseaprs(packet, len, 1);
 	if (!fap->error_code) {
-		display_packet(state, fap);
-		state->last_packet = fap;
-		store_packet(state, fap);
 		if (STREQ(fap->src_callsign, state->mycall)) {
 			state->digi_quality |= 1;
 			update_mybeacon_status(state);
+			if (state->last_packet &&
+			    STREQ(state->last_packet->src_callsign,
+				  state->mycall))
+				/* Special case: if the last packet is also
+				 * ours, merge with the new one since we
+				 * don't store our own
+				 */
+				merge_packets(fap, state->last_packet);
 		}
+		display_packet(state, fap);
+		state->last_packet = fap;
+		store_packet(state, fap);
 		ui_send(state, "I_RX", "1000");
 	}
 
