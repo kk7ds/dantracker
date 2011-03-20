@@ -1079,58 +1079,93 @@ char *choose_data(struct state *state, char *req_icon)
 	return data;
 }
 
+void separate_minutes(double minutes, unsigned char *min, unsigned char *hun)
+{
+	double _min, _hun;
+
+	_hun = modf(minutes, &_min);
+	*min = (unsigned char)_min;
+	*hun = (unsigned char)(_hun * 100);
+
+	printf("min: %hhd hun: %hhd\n", *min, *hun);
+}
+
+/* Get the @digith digit of a base-ten number
+ *
+ * 1234
+ * |||^-- 0
+ * ||^--- 1
+ * |^---- 2
+ * ^----- 3
+ */
+unsigned char get_digit(int value, int digit)
+{
+	value /= pow(10, digit);
+	return value % 10;
+}
+
 char *make_mice_beacon(struct state *state)
 {
 	char *str = NULL;
 
 	struct posit *mypos = MYPOS(state);
-	int ldeg = fabs(floor(mypos->lat));
-	int Ldeg = fabs(floor(mypos->lon));
-	double lmin = (mypos->lat - ldeg) * 60.0;
-	double Lmin = (mypos->lon - Ldeg) * 60.0;
+	double ldeg, lmin;
+	double Ldeg, Lmin;
+	int lat;
 	unsigned char north = mypos->lat > 0 ? 0x50 : 0x30;
 	unsigned char lonsc = fabs(mypos->lon) > 100 ? 0x50 : 0x30;
 	unsigned char west = mypos->lon > 0 ? 0x30 : 0x50;
 
-	unsigned char lon_deg;
-	unsigned char lon_min;
-	unsigned char lon_hun;
+	unsigned char lon_deg, lon_min, lon_hun;
 
 	unsigned char spd_htk;
 	unsigned char spd_crs;
 	unsigned char crs_tud;
 
-	ldeg = floor(mypos->lat);
-	lmin = (mypos->lat - ldeg) * 60.0;
-	Ldeg = floor(fabs(mypos->lon));
-	Lmin = (fabs(mypos->lon) - Ldeg) * 60.0;
+	lmin = modf(fabs(mypos->lat), &ldeg) * 60;
+	Lmin = modf(fabs(mypos->lon), &Ldeg) * 60;
 
+	/* Latitude DDMMmm encoded in base-10 */
+	lat = (ldeg * 10000) + (lmin * 100);
+
+	/* Longitude degrees encoded per APRS spec */
 	if (Ldeg <= 9)
-		lon_deg = Ldeg + 118;
+		lon_deg = (int)Ldeg + 118;
 	else if (Ldeg <= 99)
-		lon_deg = Ldeg + 28;
-	else if (Ldeg <= 109)
-		lon_deg = Ldeg + 108;
+		lon_deg = (int)Ldeg + 28;
+	else if (Ldeg <= (int)109)
+		lon_deg = (int)Ldeg + 108;
 	else if (Ldeg <= 179)
-		lon_deg = (Ldeg - 100) + 28;
-	lon_min = Lmin > 10 ? floor(Lmin)+28 : floor(Lmin)+88;
-	lon_hun = ((int)floor(Lmin * 100) % 100) + 28;
+		lon_deg = ((int)Ldeg - 100) + 28;
 
+	/* Minutes and hundredths of a minute encoded per APRS spec */
+	separate_minutes(Lmin, &lon_min, &lon_hun);
+	if (Lmin > 10)
+		lon_min += 28;
+	else
+		lon_min += 88;
+	lon_hun += 28;
+
+	/* Speed, hundreds and tens of knots */
 	spd_htk = (mypos->speed / 10) + 108;
+
+	/* Units of speed and course hundreds of degrees */
 	spd_crs = 32 + \
 		(((int)mypos->speed % 10) * 10) + \
 		((int)mypos->course / 100);
+
+	/* Course tens and units of degrees */
 	crs_tud = ((int)mypos->course % 100) + 28;
 
 	asprintf(&str,
 		 "%s>%c%c%c%c%c%c,%s:`%c%c%c%c%c%c%c%c",
 		 state->mycall,
-		 (ldeg / 10) | 0x50,
-		 (ldeg % 10) | 0x30,
-		 ((int)floor(lmin) / 10) | 0x50,
-		 ((int)floor(lmin) % 10) | north,
-		 ((int)floor(lmin) * 10 % 10) | lonsc,
-		 ((int)floor(lmin) * 100 % 10) | west,
+		 get_digit(lat, 5) | 0x50,
+		 get_digit(lat, 4) | 0x30,
+		 get_digit(lat, 3) | 0x50,
+		 get_digit(lat, 2) | north,
+		 get_digit(lat, 1) | lonsc,
+		 get_digit(lat, 0) | west,
 		 state->conf.digi_path,
 		 lon_deg,
 		 lon_min,
