@@ -15,6 +15,7 @@
 
 #define FILL_RED   0x990000FF
 #define FILL_GREEN 0x006600FF
+#define FILL_BLACK 0x000000FF
 
 enum {
 	TYPE_TEXT_LABEL,
@@ -166,11 +167,16 @@ int update_icon(struct named_element *e, const char *value)
 	int y = (20 + 1) * APRS_IMG_MULT * (index / 16);
 	GdkPixbuf *source = value[0] == '\\' ? aprs_sec_img : aprs_pri_img;
 
-	icon = gdk_pixbuf_new_subpixbuf(source,
-					x + APRS_IMG_MULT,
-					y + APRS_IMG_MULT,
-					20 * APRS_IMG_MULT,
-					20 * APRS_IMG_MULT);
+	if (value[0]) {
+		icon = gdk_pixbuf_new_subpixbuf(source,
+						x + APRS_IMG_MULT,
+						y + APRS_IMG_MULT,
+						20 * APRS_IMG_MULT,
+						20 * APRS_IMG_MULT);
+	} else {
+		icon = gdk_pixbuf_new(GDK_COLORSPACE_RGB, 0, 8, 20, 20);
+		gdk_pixbuf_fill(icon, FILL_BLACK);
+	}
 	gtk_image_set_from_pixbuf(GTK_IMAGE(e->widget), icon);
 	gdk_pixbuf_unref(icon);
 
