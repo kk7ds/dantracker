@@ -130,6 +130,7 @@ struct state {
 	time_t last_beacon;
 	time_t last_time_set;
 	time_t last_moving;
+	time_t last_status;
 
 	int comment_idx;
 	int other_beacon_idx;
@@ -1401,10 +1402,13 @@ int beacon(int fd, struct state *state)
 		send_beacon(fd, packet);
 		free(packet);
 
-		/* Follow up with a status packet */
-		packet = make_status_beacon(state);
-		send_beacon(fd, packet);
-		free(packet);
+		if (HAS_BEEN(state->last_status, 120)) {
+			/* Follow up with a status packet */
+			packet = make_status_beacon(state);
+			send_beacon(fd, packet);
+			free(packet);
+			state->last_status = time(NULL);
+		}
 	} else {
 		packet = make_beacon(state, NULL);
 		send_beacon(fd, packet);
