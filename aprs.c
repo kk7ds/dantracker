@@ -498,6 +498,42 @@ int find_packet(struct state *state, fap_packet_t *fap)
 	return -1;
 }
 
+#define SWAP_VAL(new, old, value)				\
+	do {							\
+		if (old->value && !new->value) {		\
+			printf("Swapping %s\n", "##value");	\
+			new->value = old->value;		\
+			old->value = 0;				\
+		}						\
+	} while (0);
+
+int merge_packets(fap_packet_t *new, fap_packet_t *old)
+{
+	SWAP_VAL(new, old, speed);
+	SWAP_VAL(new, old, course);
+	SWAP_VAL(new, old, latitude);
+	SWAP_VAL(new, old, longitude);
+	SWAP_VAL(new, old, altitude);
+	SWAP_VAL(new, old, symbol_table);
+	SWAP_VAL(new, old, symbol_code);
+
+	if (old->comment_len && !new->comment_len) {
+		new->comment_len = old->comment_len;
+		new->comment = old->comment;
+		old->comment_len = 0;
+		old->comment = NULL;
+	}
+
+	if (old->status_len && !new->status_len) {
+		new->status_len = old->status_len;
+		new->status = old->status;
+		old->status_len = 0;
+		old->status = NULL;
+	}
+
+	return 0;
+}
+
 int store_packet(struct state *state, fap_packet_t *fap)
 {
 	int i;
@@ -506,8 +542,10 @@ int store_packet(struct state *state, fap_packet_t *fap)
 		return 0; /* Don't store our own packets */
 
 	i = find_packet(state, fap);
-	if (i != -1)
+	if (i != -1) {
+		merge_packets(fap, state->recent[i]);
 		move_packets(state, i);
+	}
 	state->recent_idx = (state->recent_idx + 1) % KEEP_PACKETS;
 
 	/* If found in spot X, remove and shift all up, then
@@ -989,6 +1027,13 @@ char *process_subst(struct state *state, char *src)
 	return NULL;
 }
 
+char *get_comment(struct state *state)
+{
+	int cmt = state->comment_idx++ % state->conf.comments_count;
+
+	return process_subst(state, state->conf.comments[cmt]);
+}
+
 /*
  * Choose a comment out of the list, and choose a type
  * of (phg, wx, normal) from the list of configured types
@@ -997,10 +1042,9 @@ char *process_subst(struct state *state, char *src)
 char *choose_data(struct state *state, char *req_icon)
 {
 	char *data = NULL;
-	int cmt = state->comment_idx++ % state->conf.comments_count;
 	char *comment;
 
-	comment = process_subst(state, state->conf.comments[cmt]);
+	comment = get_comment(state);
 	if (!comment)
 		comment = strdup("Error");
 
@@ -1103,8 +1147,7 @@ char *make_mice_beacon(struct state *state)
 char *make_status_beacon(struct state *state)
 {
 	char *packet = NULL;
-	char icon;
-	char *data = choose_data(state, &icon);
+	char *data = get_comment(state);
 
 	asprintf(&packet,
 		 "%s>%s,%s:>%s",
