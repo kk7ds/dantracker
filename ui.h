@@ -15,6 +15,7 @@ enum {
 
 struct ui_msg {
 	uint16_t type;
+	uint16_t length;
 	union {
 		struct {
 			uint16_t name_len;
@@ -23,12 +24,12 @@ struct ui_msg {
 	};
 };
 
-int set_value_to(struct sockaddr *dest, unsigned int dest_len,
-		 const char *name, const char *value);
-int set_value(const char *name, const char *value);
-int get_msg(int sock, struct ui_msg **msg);
-char *get_msg_name(struct ui_msg *msg);
-char *get_msg_valu(struct ui_msg *msg);
-
+int ui_connect(struct sockaddr *dest, unsigned int dest_len);
+int ui_send(int sock, const char *name, const char *value);
+int ui_send_to(struct sockaddr *dest, unsigned int dest_len,
+	       const char *name, const char *value);
+int ui_get_msg(int sock, struct ui_msg **msg);
+char *ui_get_msg_name(struct ui_msg *msg);
+char *ui_get_msg_valu(struct ui_msg *msg);
 
 #endif

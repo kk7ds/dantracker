@@ -402,7 +402,7 @@ int server_setup_unix()
 	strcpy(sockaddr.sun_path, SOCKPATH);
 	unlink(SOCKPATH);
 
-	sock = socket(AF_UNIX, SOCK_DGRAM, 0);
+	sock = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sock < 0) {
 		perror("socket");
 		return -errno;
@@ -410,6 +410,11 @@ int server_setup_unix()
 
 	if (bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr))) {
 		perror("bind");
+		return -errno;
+	}
+
+	if (listen(sock, 1)) {
+		perror("listen");
 		return -errno;
 	}
 
@@ -425,7 +430,7 @@ int server_setup_inet()
 	sockaddr.sin_addr.s_addr = 0;
 	sockaddr.sin_port = htons(SOCKPORT);
 
-	sock = socket(AF_INET, SOCK_DGRAM, 0);
+	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (sock < 0) {
 		perror("socket");
 		return -errno;
@@ -433,6 +438,11 @@ int server_setup_inet()
 
 	if (bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr))) {
 		perror("bind");
+		return -errno;
+	}
+
+	if (listen(sock, 1)) {
+		perror("listen");
 		return -errno;
 	}
 
@@ -449,21 +459,55 @@ gboolean server_handle(GIOChannel *source, GIOCondition cond, gpointer user)
 
 	fd = g_io_channel_unix_get_fd(source);
 
-	ret = get_msg(fd, &msg);
+	ret = ui_get_msg(fd, &msg);
 	if (ret < 0) {
 		printf("Failed to receive message: %s\n", strerror(-ret));
 		return TRUE;
+	} else if (ret == 0) {
+		printf("Removed client\n");
+		close(fd);
+		return FALSE;
 	}
 
-	e = get_element(l, get_msg_name(msg));
+#if 0
+	printf("Setting %s->%s\n", ui_get_msg_name(msg), ui_get_msg_valu(msg));
+#endif
+
+	e = get_element(l, ui_get_msg_name(msg));
 	if (!e) {
-		printf("Unknown element `%s'\n", get_msg_name(msg));
+		printf("Unknown element `%s'\n", ui_get_msg_name(msg));
 		goto out;
 	}
 
-	e->update_fn(e, get_msg_valu(msg));
+	e->update_fn(e, ui_get_msg_valu(msg));
  out:
 	free(msg);
+
+	return TRUE;
+}
+
+gboolean server_handle_c(GIOChannel *source, GIOCondition cond, gpointer user)
+{
+	int sock;
+	int client;
+	struct layout *l = (void *)user;
+	struct sockaddr sa;
+	unsigned int sa_len;
+	GIOChannel *channel;
+
+	sock = g_io_channel_unix_get_fd(source);
+
+	client = accept(sock, &sa, &sa_len);
+	if (client < 0) {
+		perror("accept");
+		return TRUE;
+	}
+
+	channel = g_io_channel_unix_new(client);
+	g_io_channel_set_encoding(channel, NULL, NULL);
+	g_io_add_watch_full(channel, 0, G_IO_IN, server_handle, l, NULL);
+
+	printf("Added client\n");
 
 	return TRUE;
 }
@@ -483,7 +527,7 @@ int server_loop(struct layout *l)
 
 	channel = g_io_channel_unix_new(sock);
 	g_io_channel_set_encoding(channel, NULL, NULL);
-	id = g_io_add_watch_full(channel, 0, G_IO_IN, server_handle, l, NULL);
+	id = g_io_add_watch_full(channel, 0, G_IO_IN, server_handle_c, l, NULL);
 
 	gtk_main();
 

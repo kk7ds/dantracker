@@ -88,6 +88,7 @@ struct state {
 		double static_spd, static_crs;
 
 		struct sockaddr display_to;
+		int display_fd;
 	} conf;
 
 	struct posit mypos[KEEP_POSITS];
@@ -124,11 +125,22 @@ struct state {
 	uint8_t digi_quality;
 };
 
-int ui_send(struct state *state, const char *name, const char *value)
+int _ui_send(struct state *state, const char *name, const char *value)
 {
-	return set_value_to(&state->conf.display_to,
-			    sizeof(state->conf.display_to),
-			    name, value);
+	int ret;
+	int *fd = &state->conf.display_fd;
+
+	if (*fd < 0)
+		*fd = ui_connect(&state->conf.display_to,
+				 sizeof(state->conf.display_to));
+
+	ret = ui_send(*fd, name, value);
+	if (ret < 0) {
+		close(*fd);
+		*fd = -1;
+	}
+
+	return ret;
 }
 
 char *format_time(time_t t)
@@ -189,7 +201,7 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		 rain ? rain : "",
 		 humid ? humid : "");
 
-	ui_send(state, "AI_COMMENT", report);
+	_ui_send(state, "AI_COMMENT", report);
 
 	/* Comment is used for larger WX report, so report the
 	 * comment (if any) in the smaller course field
@@ -199,9 +211,9 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 
 		strncpy(buf, _fap->comment, _fap->comment_len);
 		buf[_fap->comment_len] = 0;
-		ui_send(state, "AI_COURSE", buf);
+		_ui_send(state, "AI_COURSE", buf);
 	} else
-		ui_send(state, "AI_COURSE", "");
+		_ui_send(state, "AI_COURSE", "");
 
 	free(report);
 	free(pres);
@@ -213,8 +225,8 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 
 void display_telemetry(struct state *state, fap_telemetry_t *fap)
 {
-	ui_send(state, "AI_COURSE", "(Telemetry)");
-	ui_send(state, "AI_COMMENT", "");
+	_ui_send(state, "AI_COURSE", "(Telemetry)");
+	_ui_send(state, "AI_COMMENT", "");
 }
 
 void display_phg(struct state *state, fap_packet_t *fap)
@@ -227,7 +239,7 @@ void display_phg(struct state *state, fap_packet_t *fap)
 	ret = sscanf(fap->phg, "%1d%c%1d%1d",
 		     &power, &height, &gain, &dir);
 	if (ret != 4) {
-		ui_send(state, "AI_COURSE", "(Broken PHG)");
+		_ui_send(state, "AI_COURSE", "(Broken PHG)");
 		return;
 	}
 
@@ -236,15 +248,15 @@ void display_phg(struct state *state, fap_packet_t *fap)
 		 pow(2, height - '0') * 10,
 		 gain,
 		 dir ? direction(dir) : "omni");
-	ui_send(state, "AI_COMMENT", buf);
+	_ui_send(state, "AI_COMMENT", buf);
 	free(buf);
 
 	if (fap->comment) {
 		buf = strndup(fap->comment, fap->comment_len);
-		ui_send(state, "AI_COURSE", buf);
+		_ui_send(state, "AI_COURSE", buf);
 		free(buf);
 	} else
-		ui_send(state, "AI_COURSE", "");
+		_ui_send(state, "AI_COURSE", "");
 }
 
 void display_posit(struct state *state, fap_packet_t *fap, int isnew)
@@ -255,20 +267,20 @@ void display_posit(struct state *state, fap_packet_t *fap, int isnew)
 		snprintf(buf, sizeof(buf), "%.0f MPH %2s",
 			 KPH_TO_MPH(*fap->speed),
 			 direction(*fap->course));
-		ui_send(state, "AI_COURSE", buf);
+		_ui_send(state, "AI_COURSE", buf);
 	} else if (isnew)
-		ui_send(state, "AI_COURSE", "");
+		_ui_send(state, "AI_COURSE", "");
 
 	if (fap->type && (*fap->type == fapSTATUS)) {
 		strncpy(buf, fap->status, fap->status_len);
 		buf[fap->status_len] = 0;
-		ui_send(state, "AI_COMMENT", buf);
+		_ui_send(state, "AI_COMMENT", buf);
 	} else if (fap->comment_len) {
 		strncpy(buf, fap->comment, fap->comment_len);
 		buf[fap->comment_len] = 0;
-		ui_send(state, "AI_COMMENT", buf);
+		_ui_send(state, "AI_COMMENT", buf);
 	} else if (isnew)
-		ui_send(state, "AI_COMMENT", "");
+		_ui_send(state, "AI_COMMENT", "");
 }
 
 void display_dist_and_dir(struct state *state, fap_packet_t *fap)
@@ -304,7 +316,7 @@ void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 						 *fap->longitude,
 						 *fap->latitude)),
 			 M_TO_FT(*fap->altitude));
-	ui_send(state, "AI_DISTANCE", buf);
+	_ui_send(state, "AI_DISTANCE", buf);
 }
 
 void display_packet(struct state *state, fap_packet_t *fap)
@@ -316,7 +328,7 @@ void display_packet(struct state *state, fap_packet_t *fap)
 	if (STREQ(fap->src_callsign, last_callsign))
 		isnew = 1;
 
-	ui_send(state, "AI_CALLSIGN", fap->src_callsign);
+	_ui_send(state, "AI_CALLSIGN", fap->src_callsign);
 	strncpy(last_callsign, fap->src_callsign, 9);
 	last_callsign[9] = 0;
 
@@ -332,7 +344,7 @@ void display_packet(struct state *state, fap_packet_t *fap)
 		display_posit(state, fap, isnew);
 
 	snprintf(buf, sizeof(buf), "%c%c", fap->symbol_table, fap->symbol_code);
-	ui_send(state, "AI_ICON", buf);
+	_ui_send(state, "AI_ICON", buf);
 }
 
 int stored_packet_desc(fap_packet_t *fap, int index,
@@ -376,7 +388,7 @@ int update_packets_ui(struct state *state)
 					   buf, sizeof(buf));
 		else
 			sprintf(buf, "%i:", i);
-		ui_send(state, name, buf);
+		_ui_send(state, name, buf);
 	}
 
 	return 0;
@@ -489,13 +501,13 @@ int update_mybeacon_status(struct state *state)
 		count += (quality >> i) & 0x01;
 
 	snprintf(buf, sizeof(buf), "%i", count / 2);
-	ui_send(state, "G_SIGBARS", buf);
+	_ui_send(state, "G_SIGBARS", buf);
 
 	if (state->last_beacon)
 		snprintf(buf, sizeof(buf), "%s ago", format_time(delta));
 	else
 		snprintf(buf, sizeof(buf), "Never");
-	ui_send(state, "G_LASTBEACON", buf);
+	_ui_send(state, "G_LASTBEACON", buf);
 
 	return 0;
 }
@@ -531,7 +543,7 @@ int handle_incoming_packet(int fd, struct state *state)
 		display_packet(state, fap);
 		state->last_packet = fap;
 		store_packet(state, fap);
-		ui_send(state, "I_RX", "1000");
+		_ui_send(state, "I_RX", "1000");
 	}
 
 	return 0;
@@ -578,7 +590,7 @@ int display_gps_info(struct state *state)
 		hour, min, sec,
 		status,
 		mypos->sats);
-	ui_send(state, "G_LATLON", buf);
+	_ui_send(state, "G_LATLON", buf);
 
 	if (mypos->speed > 1.0)
 		sprintf(buf, "%.0f MPH %2s, Alt %.0f ft",
@@ -587,9 +599,9 @@ int display_gps_info(struct state *state)
 			mypos->alt);
 	else
 		sprintf(buf, "Stationary, Alt %.0f ft", mypos->alt);
-	ui_send(state, "G_SPD", buf);
+	_ui_send(state, "G_SPD", buf);
 
-	ui_send(state, "G_MYCALL", state->mycall);
+	_ui_send(state, "G_MYCALL", state->mycall);
 
 	return 0;
 }
@@ -722,10 +734,10 @@ int handle_telemetry(int fd, struct state *state)
 	}
 
 	snprintf(_buf, sizeof(_buf), "%.1fV", state->tel.voltage);
-	ui_send(state, "T_VOLTAGE", _buf);
+	_ui_send(state, "T_VOLTAGE", _buf);
 
 	snprintf(_buf, sizeof(_buf), "%.0fF", state->tel.temp1);
-	ui_send(state, "T_TEMP1", _buf);
+	_ui_send(state, "T_TEMP1", _buf);
 
 	state->tel.last_tel = time(NULL);
 
@@ -1146,7 +1158,7 @@ int should_beacon(struct state *state)
 			strcpy(tmp, reason);
 		else
 			sprintf(tmp, "Every %s", format_time(req));
-		ui_send(state, "G_REASON", tmp);
+		_ui_send(state, "G_REASON", tmp);
 	}
 
 	if (req == 0) {
@@ -1211,7 +1223,7 @@ int beacon(int fd, struct state *state)
 	state->digi_quality <<= 1;
 	update_mybeacon_status(state);
 
-	ui_send(state, "I_TX", "1000");
+	_ui_send(state, "I_TX", "1000");
 
 	state->last_beacon_pos = state->mypos[state->mypos_idx];
 
@@ -1519,6 +1531,8 @@ int main(int argc, char **argv)
 
 	struct state state;
 	memset(&state, 0, sizeof(state));
+
+	state.conf.display_fd = -1;
 
 	printf("APRS v0.1.%04i (%s)\n", BUILD, REVISION);
 
