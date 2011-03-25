@@ -1,11 +1,6 @@
-CFLAGS += -g -Wall
-APRS_CFLAGS = -Ilibfap-1.1/src
-APRS_CFLAGS += -Iiniparser/src
+CFLAGS = -g -Wall -Ilibfap-1.1/src -Iiniparser/src
 GTK_CFLAGS = `pkg-config --cflags 'gtk+-2.0'`
 GTK_LIBS = `pkg-config --libs 'gtk+-2.0'`
-
-#GTK_CFLAGS = `pkg-config --cflags 'gtk+-2.0' | sed 's@-I/@-I$(ROOT)/@g'`
-#GTK_LIBS = -L$(ROOT)/usr/lib -L$(ROOT)/lib `pkg-config --libs 'gtk+-2.0' | sed "s@-I/@-I$(ROOT)/@g"` usr-arm/lib/libc.so.6
 
 DEST="root@beagle:carputer"
 
@@ -14,8 +9,10 @@ TARGETS = aprs ui uiclient fakegps
 all: $(TARGETS)
 
 uiclient.o: uiclient.c ui.h
+serial.o: serial.c serial.h
+nmea.o: nmea.c nmea.h
 
-aprs: aprs.c uiclient.o
+aprs: aprs.c uiclient.o serial.o nmea.o
 	test -d .hg && hg id --id > .revision || true
 	echo $$((`cat .build` + 1)) > .build
 	$(CC) $(CFLAGS) $(APRS_CFLAGS) -lfap -liniparser -o $@ $^ -DBUILD=`cat .build` -DREVISION=\"`cat .revision`\"

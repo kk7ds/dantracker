@@ -21,6 +21,9 @@
 #include <iniparser.h>
 
 #include "ui.h"
+#include "util.h"
+#include "serial.h"
+#include "nmea.h"
 
 #ifndef BUILD
 #define BUILD 0
@@ -30,13 +33,6 @@
 #define REVISION "Unknown"
 #endif
 
-#define FEND  0xC0
-
-#define STREQ(x,y) (strcmp(x, y) == 0)
-#define STRNEQ(x,y,n) (strncmp(x, y, n) == 0)
-
-#define HAS_BEEN(s, d) ((time(NULL) - s) > d)
-
 #define MYPOS(s) (&s->mypos[s->mypos_idx])
 
 #define KEEP_PACKETS 8
@@ -45,6 +41,8 @@
 #define DO_TYPE_NONE 0
 #define DO_TYPE_WX   1
 #define DO_TYPE_PHG  2
+
+#define TZ_OFFSET (-8)
 
 struct smart_beacon_point {
 	float int_sec;
@@ -92,19 +90,7 @@ struct state {
 		struct sockaddr display_to;
 	} conf;
 
-	struct posit {
-		double lat;
-		double lon;
-		double alt;
-		double course;
-		double speed;
-		int qual;
-		int sats;
-		int tstamp;
-		int dstamp;
-
-		double last_course;
-	} mypos[KEEP_POSITS];
+	struct posit mypos[KEEP_POSITS];
 	int mypos_idx;
 
 	struct posit last_beacon_pos;
@@ -138,43 +124,11 @@ struct state {
 	uint8_t digi_quality;
 };
 
-const char *CARDINALS[] = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
-
-const char *direction(double degrees)
-{
-	return CARDINALS[((int)((degrees + 360 - 22.5) / 45.0)) % 7];
-}
-
-#define PI 3.14159265
-#define DEG2RAD(x) (x*(PI/180))
-#define RAD2DEG(x) (x/(PI/180))
-
 int ui_send(struct state *state, const char *name, const char *value)
 {
 	return set_value_to(&state->conf.display_to,
 			    sizeof(state->conf.display_to),
 			    name, value);
-}
-
-double get_direction(double fLng, double fLat, double tLng, double tLat)
-{
-	double rads;
-	double result;
-
-	fLng = DEG2RAD(fLng);
-	fLat = DEG2RAD(fLat);
-	tLng = DEG2RAD(tLng);
-	tLat = DEG2RAD(tLat);
-
-	rads = atan2(sin(tLng-fLng)*cos(tLat),
-		     cos(fLat)*sin(tLat)-sin(fLat)*cos(tLat)*cos(tLng-fLng));
-
-	result = RAD2DEG(rads);
-
-	if (result < 0)
-		return result + 360;
-	else
-		return result;
 }
 
 char *format_time(time_t t)
@@ -193,44 +147,6 @@ char *format_time(time_t t)
 
 	return str;
 }
-
-int get_packet(int fd, char *buf, unsigned int *len)
-{
-	unsigned char byte = 0x00;
-	char packet[512] = "";
-	int ret;
-	int pos = 0;
-	unsigned int tnc_id;
-
-	while (byte != FEND)
-		read(fd, &byte, 1);
-
-	packet[pos++] = byte;
-
-	while (1) {
-		ret = read(fd, &byte, 1);
-		if (ret != 1)
-			continue;
-		packet[pos++] = byte;
-		if (byte == FEND)
-			break;
-	}
-
-	ret = fap_kiss_to_tnc2(packet, pos, buf, len, &tnc_id);
-	if (!ret)
-		printf("Failed to convert packet: %s\n", buf);
-
-	return ret;
-}
-
-#define KPH_TO_MPH(km) (km * 0.621371192)
-#define MS_TO_MPH(m) (m * 2.23693629)
-#define M_TO_FT(m) (m * 3.2808399)
-#define C_TO_F(c) ((c * 9.0/5.0) + 32)
-#define MM_TO_IN(mm) (mm * 0.0393700787)
-#define KTS_TO_MPH(kts) (kts * 1.15077945)
-
-#define TZ_OFFSET (-8)
 
 void display_wx(struct state *state, fap_packet_t *_fap)
 {
@@ -621,139 +537,6 @@ int handle_incoming_packet(int fd, struct state *state)
 	return 0;
 }
 
-double parse_lat(char *str)
-{
-	int deg;
-	float min;
-	int ret;
-
-	ret = sscanf(str, "%2i%f", &deg, &min);
-	if (ret != 2)
-		return 0;
-
-	return deg + (min / 60.0);
-}
-
-double parse_lon(char *str)
-{
-	int deg;
-	float min;
-	int ret;
-
-	ret = sscanf(str, "%3i%f", &deg, &min);
-	if (ret != 2)
-		return 0;
-
-	return deg + (min / 60.0);
-}
-
-int valid_checksum(char *str)
-{
-	char *ptr = str;
-	unsigned char c_cksum = 0;
-	unsigned char r_cksum;
-
-	if (str[0] != '$')
-		return 0;
-
-	str++; /* Past the $ */
-
-	for (ptr = str; *ptr && (*ptr != '*'); ptr++)
-		c_cksum ^= *ptr;
-
-	sscanf(ptr, "*%02hhx", &r_cksum);
-
-	return c_cksum == r_cksum;
-}
-
-int parse_gga(struct state *state, char *str)
-{
-	int num = 0;
-	char *field = strchr(str, ',');
-	struct posit *mypos = MYPOS(state);
-
-	//if (state->mypos.qual == 0)
-	//printf("GGA: %s\n", str);
-
-	while (str && field) {
-		*field = 0;
-
-		switch (num) {
-		case 1:
-			mypos->tstamp = atoi(str);
-			break;
-		case 2:
-			mypos->lat = parse_lat(str);
-			break;
-		case 3:
-			if (*str == 'S')
-				mypos->lat *= -1;
-			break;
-		case 4:
-			mypos->lon = parse_lon(str);
-			break;
-		case 5:
-			if (*str == 'W')
-				mypos->lon *= -1;
-			break;
-		case 6:
-			mypos->qual = atoi(str);
-			break;
-		case 7:
-			mypos->sats = atoi(str);
-			break;
-		case 9:
-			mypos->alt = atof(str);
-			break;
-		}
-
-		num++;
-		str = field + 1;
-		field = strchr(str, ',');
-	}
-
-	return 1;
-}
-
-int parse_rmc(struct state *state, char *str)
-{
-	int num = 0;
-	char *field = strchr(str, ',');
-	struct posit *mypos;
-
-	state->mypos_idx = (state->mypos_idx + 1) % KEEP_POSITS;
-	mypos = MYPOS(state);
-
-	//if (state->mypos.qual == 0)
-	//printf("RMC: %s\n", str);
-
-	while (str && field) {
-		*field = 0;
-
-		switch (num) {
-		case 2:
-			if (*str != 'A') /* Not ACTIVE */
-				return 1;
-			break;
-		case 7:
-			mypos->speed = atof(str);
-			break;
-		case 8:
-			mypos->course = atof(str);
-			break;
-		case 9:
-			mypos->dstamp = atoi(str);
-			break;
-		};
-
-		num++;
-		str = field + 1;
-		field = strchr(str, ',');
-	}
-
-	return 1;
-}
-
 int parse_gps_string(struct state *state)
 {
 	char *str = state->gps_buffer;
@@ -764,10 +547,12 @@ int parse_gps_string(struct state *state)
 	if (!valid_checksum(str))
 		return 0;
 
-	if (strncmp(str, "$GPGGA", 6) == 0)
-		return parse_gga(state, str);
-	else if (strncmp(str, "$GPRMC", 6) == 0)
-		return parse_rmc(state, str);
+	if (strncmp(str, "$GPGGA", 6) == 0) {
+		return parse_gga(MYPOS(state), str);
+	} else if (strncmp(str, "$GPRMC", 6) == 0) {
+		state->mypos_idx = (state->mypos_idx + 1) % KEEP_POSITS;
+		return parse_rmc(MYPOS(state), str);
+	}
 
 	return 0;
 }
@@ -1483,67 +1268,6 @@ int fake_gps_data(struct state *state)
 	}
 
 	return 0;
-}
-
-int get_rate_const(int baudrate)
-{
-	switch (baudrate) {
-	case 1200:   return B1200;
-	case 4800:   return B4800;
-	case 9600:   return B9600;
-	case 19200:  return B19200;
-	case 38400:  return B38400;
-	case 115200: return B115200;
-	};
-
-	printf("Unsupported baudrate %i\n", baudrate);
-
-	return B9600;
-}
-
-int serial_set_rate(int fd, int baudrate)
-{
-	struct termios term;
-	int ret;
-
-	ret = tcgetattr(fd, &term);
-	if (ret < 0)
-		goto err;
-
-	cfmakeraw(&term);
-	cfsetspeed(&term, get_rate_const(baudrate));
-
-	ret = tcsetattr(fd, TCSAFLUSH, &term);
-	if (ret < 0)
-		goto err;
-
-	return 0;
- err:
-	perror("unable to configure serial port");
-	return ret;
-}
-
-int serial_open(const char *device, int baudrate)
-{
-	int fd;
-	int ret;
-	struct stat s;
-
-	fd = open(device, O_RDWR);
-	if (fd < 0)
-		return fd;
-
-	fstat(fd, &s);
-
-	if (S_ISCHR(s.st_mode)) {
-		ret = serial_set_rate(fd, baudrate);
-		if (ret) {
-			close(fd);
-			fd = ret;
-		}
-	}
-
-	return fd;
 }
 
 int lookup_host(struct state *state, const char *hostname)
