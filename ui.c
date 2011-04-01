@@ -84,13 +84,15 @@ int switch_to_map(struct layout *l, struct key_map *km);
 int switch_to_main(struct layout *l, struct key_map *km);
 int main_move_cursor(struct layout *l, struct key_map *km);
 int main_beacon(struct layout *l, struct key_map *km);
+int main_init_kiss(struct layout *l, struct key_map *km);
 
 struct key_map main_screen[] = {
+	{'b',  0,         main_beacon},
 	{'c',  0,         switch_to_config},
 	{'m',  0,         switch_to_map},
+	{'k',  0,         main_init_kiss},
 	{0,    KEY_DN,    main_move_cursor},
 	{0,    KEY_UP,    main_move_cursor},
-	{'b',  0,         main_beacon},
 	{0x00, 0,      NULL}
 };
 
@@ -177,7 +179,6 @@ int switch_to_main(struct layout *l, struct key_map *km)
 
 int main_move_cursor(struct layout *l, struct key_map *km)
 {
-	int i;
 	char buf[] = "AI_00";
 	struct named_element *e;
 	GdkColor h_color, n_color;
@@ -216,6 +217,13 @@ int main_move_cursor(struct layout *l, struct key_map *km)
 int main_beacon(struct layout *l, struct key_map *km)
 {
 	ui_send(l->state.last_ui_fd, "BEACONNOW", "");
+
+	return 0;
+}
+
+int main_init_kiss(struct layout *l, struct key_map *km)
+{
+	ui_send(l->state.last_ui_fd, "INITKISS", "");
 
 	return 0;
 }

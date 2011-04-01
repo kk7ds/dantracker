@@ -3,10 +3,18 @@
 #include <termios.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <signal.h>
 
 #include <fap.h>
 
 #define FEND  0xC0
+
+static int ALARM_INSTALLED = 0;
+
+void alarm_handler(int signal)
+{
+	printf("IO Timeout\n");
+}
 
 int get_packet(int fd, char *buf, unsigned int *len)
 {
@@ -16,8 +24,24 @@ int get_packet(int fd, char *buf, unsigned int *len)
 	int pos = 0;
 	unsigned int tnc_id;
 
-	while (byte != FEND)
-		read(fd, &byte, 1);
+	if (!ALARM_INSTALLED) {
+		struct sigaction action;
+		action.sa_handler = alarm_handler;
+		action.sa_flags = 0;
+		sigemptyset(&action.sa_mask);
+		sigaction(SIGALRM, &action, NULL);
+		ALARM_INSTALLED = 1;
+	}
+
+	alarm(5); /* Five second timeout */
+
+	while (byte != FEND) {
+		ret = read(fd, &byte, 1);
+		if (ret < 0) {
+			printf("TNC read failed: %m\n");
+			return 0;
+		}
+	}
 
 	packet[pos++] = byte;
 
@@ -29,6 +53,8 @@ int get_packet(int fd, char *buf, unsigned int *len)
 		if (byte == FEND)
 			break;
 	}
+
+	alarm(0);
 
 	ret = fap_kiss_to_tnc2(packet, pos, buf, len, &tnc_id);
 	if (!ret)

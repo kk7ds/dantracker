@@ -87,8 +87,9 @@ struct state {
 		double static_lat, static_lon, static_alt;
 		double static_spd, static_crs;
 
+		char *init_kiss_cmd;
+
 		struct sockaddr display_to;
-		int display_fd;
 	} conf;
 
 	struct posit mypos[KEEP_POSITS];
@@ -105,6 +106,11 @@ struct state {
 	} tel;
 
 	char *mycall;
+
+	int tncfd;
+	int gpsfd;
+	int telfd;
+	int dspfd;
 
 	fap_packet_t *last_packet; /* In case we don't store it below */
 	fap_packet_t *recent[KEEP_PACKETS];
@@ -128,7 +134,7 @@ struct state {
 int _ui_send(struct state *state, const char *name, const char *value)
 {
 	int ret;
-	int *fd = &state->conf.display_fd;
+	int *fd = &state->dspfd;
 
 	if (*fd < 0)
 		*fd = ui_connect(&state->conf.display_to,
@@ -523,7 +529,7 @@ int update_mybeacon_status(struct state *state)
 	return 0;
 }
 
-int handle_incoming_packet(int fd, struct state *state)
+int handle_incoming_packet(struct state *state)
 {
 	char packet[512];
 	unsigned int len = sizeof(packet);
@@ -532,7 +538,7 @@ int handle_incoming_packet(int fd, struct state *state)
 
 	memset(packet, 0, len);
 
-	ret = get_packet(fd, packet, &len);
+	ret = get_packet(state->tncfd, packet, &len);
 	if (!ret)
 		return -1;
 
@@ -647,13 +653,13 @@ int set_time(struct state *state)
 	return 0;
 }
 
-int handle_gps_data(int fd, struct state *state)
+int handle_gps_data(struct state *state)
 {
 	char buf[33];
 	int ret;
 	char *cr;
 
-	ret = read(fd, buf, 32);
+	ret = read(state->gpsfd, buf, 32);
 	buf[ret] = 0; /* Safe because size is +1 */
 
 	if (ret < 0) {
@@ -694,7 +700,7 @@ int handle_gps_data(int fd, struct state *state)
 	return 0;
 }
 
-int handle_telemetry(int fd, struct state *state)
+int handle_telemetry(struct state *state)
 {
 	char _buf[512] = "";
 	int i = 0;
@@ -703,7 +709,7 @@ int handle_telemetry(int fd, struct state *state)
 	char *space;
 
 	while (i < sizeof(_buf)) {
-		ret = read(fd, &buf[i], 1);
+		ret = read(state->telfd, &buf[i], 1);
 		if (buf[i] == '\n')
 			break;
 		if (ret < 0)
@@ -764,16 +770,31 @@ int handle_display_showinfo(struct state *state, int index)
 	return 0;
 }
 
+int handle_display_initkiss(struct state *state)
+{
+	const char *cmd = state->conf.init_kiss_cmd;
+	int ret;
+	char foo;
+
+	ret = write(state->tncfd, cmd, strlen(cmd));
+	if (ret > 0)
+		printf("Sent KISS initialization command\n");
+	else
+		printf("Failed to send KISS initialization command: %m\n");
+
+	return 0;
+}
+
 int handle_display(struct state *state)
 {
 	struct ui_msg *msg = NULL;
 	const char *name;
 	int ret;
 
-	ret = ui_get_msg(state->conf.display_fd, &msg);
+	ret = ui_get_msg(state->dspfd, &msg);
 	if ((ret < 0) || !msg) {
-		close(state->conf.display_fd);
-		state->conf.display_fd = -1;
+		close(state->dspfd);
+		state->dspfd = -1;
 		perror("display");
 		return -errno;
 	}
@@ -787,6 +808,8 @@ int handle_display(struct state *state)
 		ret = handle_display_showinfo(state, index);
 	} else if (STREQ(name, "BEACONNOW")) {
 		state->last_beacon = 0;
+	} else if (STREQ(name, "INITKISS")) {
+		handle_display_initkiss(state);
 	} else {
 		printf("Display said: %s: %s\n",
 		       ui_get_msg_name(msg), ui_get_msg_valu(msg));
@@ -1238,7 +1261,7 @@ int send_beacon(int fd, char *packet)
 	return write(fd, buf, len) == len;
 }
 
-int beacon(int fd, struct state *state)
+int beacon(struct state *state)
 {
 	char *packet;
 	static time_t max_beacon_check = 0;
@@ -1255,19 +1278,19 @@ int beacon(int fd, struct state *state)
 	if (MYPOS(state)->speed > 5) {
 		/* Send a short MIC-E position beacon */
 		packet = make_mice_beacon(state);
-		send_beacon(fd, packet);
+		send_beacon(state->tncfd, packet);
 		free(packet);
 
 		if (HAS_BEEN(state->last_status, 120)) {
 			/* Follow up with a status packet */
 			packet = make_status_beacon(state);
-			send_beacon(fd, packet);
+			send_beacon(state->tncfd, packet);
 			free(packet);
 			state->last_status = time(NULL);
 		}
 	} else {
 		packet = make_beacon(state, NULL);
-		send_beacon(fd, packet);
+		send_beacon(state->tncfd, packet);
 		free(packet);
 	}
 
@@ -1455,6 +1478,13 @@ int parse_ini(char *filename, struct state *state)
 		state->conf.tnc = iniparser_getstring(ini, "tnc:port", NULL);
 	state->conf.tnc_rate = iniparser_getint(ini, "tnc:rate", 9600);
 
+	state->conf.init_kiss_cmd = iniparser_getstring(ini,
+							"tnc:init_kiss_cmd",
+							"");
+	for (tmp = state->conf.init_kiss_cmd; *tmp; tmp++)
+		if (*tmp == ',')
+			*tmp = '\r';
+
 	if (!state->conf.gps)
 		state->conf.gps = iniparser_getstring(ini, "gps:port", NULL);
 	state->conf.gps_type = iniparser_getstring(ini, "gps:type", "static");
@@ -1574,9 +1604,6 @@ int parse_ini(char *filename, struct state *state)
 
 int main(int argc, char **argv)
 {
-	int tncfd;
-	int gpsfd;
-	int telfd;
 	int i;
 
 	fd_set fds;
@@ -1584,7 +1611,7 @@ int main(int argc, char **argv)
 	struct state state;
 	memset(&state, 0, sizeof(state));
 
-	state.conf.display_fd = -1;
+	state.dspfd = -1;
 
 	printf("APRS v0.1.%04i (%s)\n", BUILD, REVISION);
 
@@ -1609,29 +1636,31 @@ int main(int argc, char **argv)
 	for (i = 0; i < KEEP_PACKETS; i++)
 		state.recent[i] = NULL;
 
-	tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate);
-	if (tncfd < 0) {
+	state.tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate);
+	if (state.tncfd < 0) {
 		printf("Failed to open TNC: %m\n");
 		exit(1);
 	}
 
 	if (state.conf.gps) {
-		gpsfd = serial_open(state.conf.gps, state.conf.gps_rate);
-		if (gpsfd < 0) {
+		state.gpsfd = serial_open(state.conf.gps, state.conf.gps_rate);
+		if (state.gpsfd < 0) {
 			perror(state.conf.gps);
 			exit(1);
 		}
 	} else
-		gpsfd = -1;
+		state.gpsfd = -1;
 
 	if (state.conf.tel) {
-		telfd = serial_open(state.conf.tel, state.conf.tel_rate);
-		if (telfd < 0) {
+		state.telfd = serial_open(state.conf.tel, state.conf.tel_rate);
+		if (state.telfd < 0) {
 			perror(state.conf.tel);
 			exit(1);
 		}
 	} else
-		telfd = -1;
+		state.telfd = -1;
+
+	_ui_send(&state, "AI_CALLSIGN", "HELLO");
 
 	while (1) {
 		int ret;
@@ -1639,13 +1668,13 @@ int main(int argc, char **argv)
 
 		FD_ZERO(&fds);
 
-		FD_SET(tncfd, &fds);
-		if (gpsfd > 0)
-			FD_SET(gpsfd, &fds);
-		if (telfd > 0)
-			FD_SET(telfd, &fds);
-		if (state.conf.display_fd > 0)
-			FD_SET(state.conf.display_fd, &fds);
+		FD_SET(state.tncfd, &fds);
+		if (state.gpsfd > 0)
+			FD_SET(state.gpsfd, &fds);
+		if (state.telfd > 0)
+			FD_SET(state.telfd, &fds);
+		if (state.dspfd > 0)
+			FD_SET(state.dspfd, &fds);
 
 		if (STREQ(state.conf.gps_type, "static"))
 			fake_gps_data(&state);
@@ -1657,19 +1686,21 @@ int main(int argc, char **argv)
 				break;
 			continue;
 		} else if (ret > 0) {
-			if (FD_ISSET(tncfd, &fds))
-				handle_incoming_packet(tncfd, &state);
-			if (FD_ISSET(gpsfd, &fds))
-				handle_gps_data(gpsfd, &state);
-			if (FD_ISSET(telfd, &fds))
-				handle_telemetry(telfd, &state);
-			if (FD_ISSET(state.conf.display_fd, &fds))
+			if (FD_ISSET(state.tncfd, &fds))
+				handle_incoming_packet(&state);
+			if (FD_ISSET(state.gpsfd, &fds))
+				handle_gps_data(&state);
+			if (FD_ISSET(state.telfd, &fds))
+				handle_telemetry(&state);
+			if (FD_ISSET(state.dspfd, &fds))
 				handle_display(&state);
 		}
 
-		beacon(tncfd, &state);
+		beacon(&state);
 		fflush(NULL);
 	}
 
 	fap_cleanup();
+
+	return 0;
 }
