@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 
 #include <gtk/gtk.h>
+#include <gdk/gdk.h>
 #include <pango/pango.h>
 
 #include "ui.h"
@@ -16,6 +17,15 @@
 #define FILL_RED   0x990000FF
 #define FILL_GREEN 0x006600FF
 #define FILL_BLACK 0x000000FF
+
+#define KEY_LT 65361
+#define KEY_UP 65362
+#define KEY_RT 65363
+#define KEY_DN 65364
+#define KEY_ENTER 65293
+
+GdkPixbuf *aprs_pri_img;
+GdkPixbuf *aprs_sec_img;
 
 enum {
 	TYPE_TEXT_LABEL,
@@ -31,6 +41,7 @@ struct named_element {
 	int (*update_fn)(struct named_element *e, const char *value);
 };
 
+struct key_map;
 struct layout {
 	GtkWidget *window;
 	GtkWidget *fixed;
@@ -45,6 +56,13 @@ struct layout {
 	unsigned int max;
 	unsigned int nxt;
 	struct named_element *elements;
+
+	struct key_map *key_map;
+
+	struct {
+		int main_selected;
+		int last_ui_fd;
+	} state;
 };
 
 struct element_layout {
@@ -55,8 +73,31 @@ struct element_layout {
 	int width;
 };
 
-GdkPixbuf *aprs_pri_img;
-GdkPixbuf *aprs_sec_img;
+struct key_map {
+	char key;
+	int keyval;
+	int (*switch_fn)(struct layout *l, struct key_map *km);
+};
+
+int switch_to_config(struct layout *l, struct key_map *km);
+int switch_to_map(struct layout *l, struct key_map *km);
+int switch_to_main(struct layout *l, struct key_map *km);
+int main_move_cursor(struct layout *l, struct key_map *km);
+int main_beacon(struct layout *l, struct key_map *km);
+
+struct key_map main_screen[] = {
+	{'c',  0,         switch_to_config},
+	{'m',  0,         switch_to_map},
+	{0,    KEY_DN,    main_move_cursor},
+	{0,    KEY_UP,    main_move_cursor},
+	{'b',  0,         main_beacon},
+	{0x00, 0,      NULL}
+};
+
+struct key_map config_screen[] = {
+	{0x1B, 0, switch_to_main},
+	{0x00, 0, NULL}
+};
 
 struct element_layout aprs_info_elements[] = {
 	{"AI_ICON",     600, 0},
@@ -112,6 +153,71 @@ struct named_element *get_element(struct layout *l, const char *name)
 		if (strcmp(l->elements[i].name, name) == 0)
 			return &l->elements[i];
 	return NULL;
+}
+
+int switch_to_config(struct layout *l, struct key_map *km)
+{
+	gtk_widget_hide(l->window);
+	printf("Switch to config\n");
+	return 0;
+}
+
+int switch_to_map(struct layout *l, struct key_map *km)
+{
+	printf("Switch to map\n");
+	return 0;
+}
+
+int switch_to_main(struct layout *l, struct key_map *km)
+{
+	gtk_widget_show(l->window);
+	printf("Switch to main\n");
+	return 0;
+}
+
+int main_move_cursor(struct layout *l, struct key_map *km)
+{
+	int i;
+	char buf[] = "AI_00";
+	struct named_element *e;
+	GdkColor h_color, n_color;
+	char sta[] = "000";
+
+	gdk_color_parse("red", &h_color);
+	gdk_color_parse(FG_COLOR_TEXT, &n_color);
+
+	if (l->state.main_selected >= 0) {
+		sprintf(buf, "AL_%02i", l->state.main_selected);
+		e = get_element(l, buf);
+		gtk_widget_modify_fg(e->widget, GTK_STATE_NORMAL, &n_color);
+	}
+
+	if (km->keyval == KEY_DN) {
+		if (l->state.main_selected < 7)
+			l->state.main_selected++;
+	} else if (km->keyval == KEY_UP) {
+		if (l->state.main_selected > -1)
+			l->state.main_selected--;
+	}
+
+	snprintf(sta, sizeof(sta), "%d", l->state.main_selected);
+	ui_send(l->state.last_ui_fd, "STATIONINFO", sta);
+
+	if (l->state.main_selected < 0)
+		return 0;
+
+	sprintf(buf, "AL_%02i", l->state.main_selected);
+	e = get_element(l, buf);
+	gtk_widget_modify_fg(e->widget, GTK_STATE_NORMAL, &h_color);
+
+	return 0;
+}
+
+int main_beacon(struct layout *l, struct key_map *km)
+{
+	ui_send(l->state.last_ui_fd, "BEACONNOW", "");
+
+	return 0;
 }
 
 int update_text_label(struct named_element *e, const char *value)
@@ -346,6 +452,28 @@ int make_indicators(struct layout *l)
 	return 0;
 }
 
+gboolean main_button(GtkWidget *window, GdkEvent *event, gpointer *data)
+{
+	int i;
+	struct layout *l = (struct layout *)data;
+
+	for (i = 0; l->key_map[i].switch_fn; i++) {
+		struct key_map *km = &l->key_map[i];
+		if (km->key && (km->key == *event->key.string)) {
+			printf("Dispatching key\n");
+			km->switch_fn(l, km);
+			return TRUE;
+		} else if (km->keyval && (km->keyval == event->key.keyval)) {
+			km->switch_fn(l, km);
+			return TRUE;
+		}
+	}
+
+	printf("Key: %s (%i)\n", event->key.string, event->key.keyval);
+
+	return FALSE;
+}
+
 int make_window(struct layout *l)
 {
 	GdkColor color = {0, 0, 0};
@@ -389,6 +517,12 @@ int make_window(struct layout *l)
 	gtk_widget_set_size_request(l->sep3, 720, 10);
 	gtk_widget_show(l->sep3);
 	gtk_fixed_put(GTK_FIXED(l->fixed), l->sep3, 0, 340);
+
+	gtk_widget_add_events(GTK_WIDGET(l->window), GDK_KEY_PRESS_MASK);
+	gtk_signal_connect(GTK_OBJECT(l->window), "key-press-event",
+			   G_CALLBACK(main_button), l);
+
+	l->key_map = main_screen;
 
 	return 0;
 }
@@ -506,6 +640,7 @@ gboolean server_handle_c(GIOChannel *source, GIOCondition cond, gpointer user)
 	channel = g_io_channel_unix_new(client);
 	g_io_channel_set_encoding(channel, NULL, NULL);
 	g_io_add_watch_full(channel, 0, G_IO_IN, server_handle, l, NULL);
+	l->state.last_ui_fd = client;
 
 	printf("Added client\n");
 
@@ -537,6 +672,9 @@ int server_loop(struct layout *l)
 int main(int argc, char **argv)
 {
 	struct layout layout;
+
+	memset(&layout, 0, sizeof(layout));
+	layout.state.main_selected = -1;
 
 	gtk_init(&argc, &argv);
 

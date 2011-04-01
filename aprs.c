@@ -747,6 +747,55 @@ int handle_telemetry(int fd, struct state *state)
 	return 0;
 }
 
+int handle_display_showinfo(struct state *state, int index)
+{
+	fap_packet_t *fap;
+	int number = (state->recent_idx + KEEP_PACKETS - index) % KEEP_PACKETS;
+
+	if (index < 0)
+		fap = state->last_packet;
+	else
+		fap = state->recent[number];
+	if (!fap)
+		return 1;
+
+	display_packet(state, fap);
+
+	return 0;
+}
+
+int handle_display(struct state *state)
+{
+	struct ui_msg *msg = NULL;
+	const char *name;
+	int ret;
+
+	ret = ui_get_msg(state->conf.display_fd, &msg);
+	if ((ret < 0) || !msg) {
+		close(state->conf.display_fd);
+		state->conf.display_fd = -1;
+		perror("display");
+		return -errno;
+	}
+
+	name = ui_get_msg_name(msg);
+	if (!name)
+		goto out;
+
+	if (STREQ(name, "STATIONINFO")) {
+		int index = atoi(ui_get_msg_valu(msg));
+		ret = handle_display_showinfo(state, index);
+	} else if (STREQ(name, "BEACONNOW")) {
+		state->last_beacon = 0;
+	} else {
+		printf("Display said: %s: %s\n",
+		       ui_get_msg_name(msg), ui_get_msg_valu(msg));
+	}
+ out:
+	free(msg);
+	return ret;
+}
+
 /* Get a substitution value for a given key (result must be free()'d) */
 char *get_subst(struct state *state, char *key)
 {
@@ -1584,17 +1633,19 @@ int main(int argc, char **argv)
 	} else
 		telfd = -1;
 
-	FD_ZERO(&fds);
-
 	while (1) {
 		int ret;
 		struct timeval tv = {1, 0};
+
+		FD_ZERO(&fds);
 
 		FD_SET(tncfd, &fds);
 		if (gpsfd > 0)
 			FD_SET(gpsfd, &fds);
 		if (telfd > 0)
 			FD_SET(telfd, &fds);
+		if (state.conf.display_fd > 0)
+			FD_SET(state.conf.display_fd, &fds);
 
 		if (STREQ(state.conf.gps_type, "static"))
 			fake_gps_data(&state);
@@ -1602,6 +1653,8 @@ int main(int argc, char **argv)
 		ret = select(100, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
 			perror("select");
+			if (errno == EBADF)
+				break;
 			continue;
 		} else if (ret > 0) {
 			if (FD_ISSET(tncfd, &fds))
@@ -1610,6 +1663,8 @@ int main(int argc, char **argv)
 				handle_gps_data(gpsfd, &state);
 			if (FD_ISSET(telfd, &fds))
 				handle_telemetry(telfd, &state);
+			if (FD_ISSET(state.conf.display_fd, &fds))
+				handle_display(&state);
 		}
 
 		beacon(tncfd, &state);
