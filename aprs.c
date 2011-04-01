@@ -466,24 +466,35 @@ int store_packet(struct state *state, fap_packet_t *fap)
 {
 	int i;
 
-	if (STREQ(fap->src_callsign, state->mycall))
-		return 0; /* Don't store our own packets */
+	if (state->last_packet &&
+	    STREQ(state->last_packet->src_callsign, fap->src_callsign)) {
+		/* Received another packet for the latest, merge and bail */
+		merge_packets(fap, state->last_packet);
+		fap_free(state->last_packet);
+		goto out;
+	}
 
+	/* If the station has been heard, remove it from the old position
+	 * in the list and merge its data into the current one
+	 */
 	i = find_packet(state, fap);
 	if (i != -1) {
 		merge_packets(fap, state->recent[i]);
 		move_packets(state, i);
 	}
-	state->recent_idx = (state->recent_idx + 1) % KEEP_PACKETS;
 
-	/* If found in spot X, remove and shift all up, then
-	 * replace at top
-	 */
+	/* Note: we don't store our own packets on the list */
 
-	if (state->recent[state->recent_idx])
-		fap_free(state->recent[state->recent_idx]);
-	state->recent[state->recent_idx] = fap;
-
+	if (state->last_packet &&
+	    !STREQ(state->last_packet->src_callsign, state->mycall)) {
+		/* Push the previously-current packet onto the list */
+		state->recent_idx = (state->recent_idx + 1) % KEEP_PACKETS;
+		if (state->recent[state->recent_idx])
+			fap_free(state->recent[state->recent_idx]);
+		state->recent[state->recent_idx] = state->last_packet;
+	}
+ out:
+	state->last_packet = fap;
 	update_packets_ui(state);
 
 	return 0;
@@ -528,21 +539,13 @@ int handle_incoming_packet(int fd, struct state *state)
 	printf("%s\n", packet);
 	fap = fap_parseaprs(packet, len, 1);
 	if (!fap->error_code) {
+		store_packet(state, fap);
 		if (STREQ(fap->src_callsign, state->mycall)) {
 			state->digi_quality |= 1;
 			update_mybeacon_status(state);
-			if (state->last_packet &&
-			    STREQ(state->last_packet->src_callsign,
-				  state->mycall))
-				/* Special case: if the last packet is also
-				 * ours, merge with the new one since we
-				 * don't store our own
-				 */
-				merge_packets(fap, state->last_packet);
 		}
 		display_packet(state, fap);
 		state->last_packet = fap;
-		store_packet(state, fap);
 		_ui_send(state, "I_RX", "1000");
 	}
 
