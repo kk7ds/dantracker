@@ -131,6 +131,22 @@ struct state {
 	uint8_t digi_quality;
 };
 
+int send_beacon(int fd, char *packet)
+{
+	char buf[512];
+	int ret;
+	unsigned int len = sizeof(buf);
+
+	printf("Sending Packet: %s\n", packet);
+
+	ret = fap_tnc2_to_kiss(packet, strlen(packet), 0, buf, &len);
+	if (!ret) {
+		printf("Failed to make beacon KISS packet\n");
+		return 1;
+	}
+	return write(fd, buf, len) == len;
+}
+
 int _ui_send(struct state *state, const char *name, const char *value)
 {
 	int ret;
@@ -529,6 +545,53 @@ int update_mybeacon_status(struct state *state)
 	return 0;
 }
 
+int should_digi_packet(fap_packet_t *fap)
+{
+	/* We digi if the first element of the path is "TEMP1-N" */
+	return ((fap->path_len > 0) &&
+		fap->path && fap->path[0] &&
+		STRNEQ(fap->path[0], "TEMP1", 5));
+}
+
+int digi_packet(struct state *state, fap_packet_t *fap)
+{
+	char *first_digi_start, *first_digi_end;
+	char *copy_packet = NULL;
+	char *digi_packet = NULL;
+	int ret;
+
+	copy_packet = strdup(fap->orig_packet);
+	if (!copy_packet)
+		return 0;
+
+	first_digi_start = strstr(copy_packet, fap->path[0]);
+	first_digi_end = first_digi_start + strlen(fap->path[0]);
+	if (!first_digi_start || (first_digi_end <= first_digi_start)) {
+		printf("DIGI: failed to find first digi `%s' in %s\n",
+		       fap->path[0], copy_packet);
+		ret = 0;
+		goto out;
+	}
+	*first_digi_start = '\0';
+
+	ret = asprintf(&digi_packet, "%s%s%s",
+		       copy_packet,
+		       state->mycall,
+		       first_digi_end);
+	if (ret < 0)
+		goto out;
+
+
+	ret = send_beacon(state->tncfd, digi_packet);
+	_ui_send(state, "I_DG", "1000");
+
+ out:
+	free(copy_packet);
+	free(digi_packet);
+
+	return ret;
+}
+
 int handle_incoming_packet(struct state *state)
 {
 	char packet[512];
@@ -553,6 +616,8 @@ int handle_incoming_packet(struct state *state)
 		display_packet(state, fap);
 		state->last_packet = fap;
 		_ui_send(state, "I_RX", "1000");
+		if (should_digi_packet(fap))
+			digi_packet(state, fap);
 	}
 
 	return 0;
@@ -774,7 +839,6 @@ int handle_display_initkiss(struct state *state)
 {
 	const char *cmd = state->conf.init_kiss_cmd;
 	int ret;
-	char foo;
 
 	ret = write(state->tncfd, cmd, strlen(cmd));
 	if (ret > 0)
@@ -1245,22 +1309,6 @@ int should_beacon(struct state *state)
 		return delta > req;
 }
 
-int send_beacon(int fd, char *packet)
-{
-	char buf[512];
-	int ret;
-	unsigned int len = sizeof(buf);
-
-	printf("Sending Packet: %s\n", packet);
-
-	ret = fap_tnc2_to_kiss(packet, strlen(packet), 0, buf, &len);
-	if (!ret) {
-		printf("Failed to make beacon KISS packet\n");
-		return 1;
-	}
-	return write(fd, buf, len) == len;
-}
-
 int beacon(struct state *state)
 {
 	char *packet;
@@ -1465,6 +1513,29 @@ char **parse_list(char *string, int *count)
 	return list;
 }
 
+char *process_tnc_cmd(char *cmd)
+{
+	char *ret;
+	char *a, *b;
+
+	ret = malloc(strlen(cmd) * 2);
+	if (ret < 0)
+		return NULL;
+
+	for (a = cmd, b = ret; *a; a++, b++) {
+		if (*a == ',')
+			*b = '\r';
+		else
+			*b = *a;
+	}
+
+	*b = '\0';
+
+	printf("TNC command: `%s'\n", ret);
+
+	return ret;
+}
+
 int parse_ini(char *filename, struct state *state)
 {
 	dictionary *ini;
@@ -1478,12 +1549,8 @@ int parse_ini(char *filename, struct state *state)
 		state->conf.tnc = iniparser_getstring(ini, "tnc:port", NULL);
 	state->conf.tnc_rate = iniparser_getint(ini, "tnc:rate", 9600);
 
-	state->conf.init_kiss_cmd = iniparser_getstring(ini,
-							"tnc:init_kiss_cmd",
-							"");
-	for (tmp = state->conf.init_kiss_cmd; *tmp; tmp++)
-		if (*tmp == ',')
-			*tmp = '\r';
+	tmp = iniparser_getstring(ini, "tnc:init_kiss_cmd", "");
+	state->conf.init_kiss_cmd = process_tnc_cmd(tmp);
 
 	if (!state->conf.gps)
 		state->conf.gps = iniparser_getstring(ini, "gps:port", NULL);
@@ -1636,14 +1703,16 @@ int main(int argc, char **argv)
 	for (i = 0; i < KEEP_PACKETS; i++)
 		state.recent[i] = NULL;
 
-	state.tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate);
+	state.tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate, 1);
 	if (state.tncfd < 0) {
 		printf("Failed to open TNC: %m\n");
 		exit(1);
 	}
 
+	handle_display_initkiss(&state);
+
 	if (state.conf.gps) {
-		state.gpsfd = serial_open(state.conf.gps, state.conf.gps_rate);
+		state.gpsfd = serial_open(state.conf.gps, state.conf.gps_rate, 0);
 		if (state.gpsfd < 0) {
 			perror(state.conf.gps);
 			exit(1);
@@ -1652,7 +1721,7 @@ int main(int argc, char **argv)
 		state.gpsfd = -1;
 
 	if (state.conf.tel) {
-		state.telfd = serial_open(state.conf.tel, state.conf.tel_rate);
+		state.telfd = serial_open(state.conf.tel, state.conf.tel_rate, 0);
 		if (state.telfd < 0) {
 			perror(state.conf.tel);
 			exit(1);
