@@ -79,7 +79,7 @@ int get_rate_const(int baudrate)
 	return B9600;
 }
 
-int serial_set_rate(int fd, int baudrate)
+int serial_set_rate(int fd, int baudrate, int hwflow)
 {
 	struct termios term;
 	int ret;
@@ -91,6 +91,11 @@ int serial_set_rate(int fd, int baudrate)
 	cfmakeraw(&term);
 	cfsetspeed(&term, get_rate_const(baudrate));
 
+	if (hwflow)
+		term.c_cflag |= CRTSCTS;
+	else
+		term.c_cflag &= ~CRTSCTS;
+
 	ret = tcsetattr(fd, TCSAFLUSH, &term);
 	if (ret < 0)
 		goto err;
@@ -101,7 +106,7 @@ int serial_set_rate(int fd, int baudrate)
 	return ret;
 }
 
-int serial_open(const char *device, int baudrate)
+int serial_open(const char *device, int baudrate, int hwflow)
 {
 	int fd;
 	int ret;
@@ -114,7 +119,7 @@ int serial_open(const char *device, int baudrate)
 	fstat(fd, &s);
 
 	if (S_ISCHR(s.st_mode)) {
-		ret = serial_set_rate(fd, baudrate);
+		ret = serial_set_rate(fd, baudrate, hwflow);
 		if (ret) {
 			close(fd);
 			fd = ret;
