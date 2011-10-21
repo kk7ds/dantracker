@@ -14,9 +14,10 @@
 #define BG_COLOR "black"
 #define FG_COLOR_TEXT "white"
 
-#define FILL_RED   0x990000FF
-#define FILL_GREEN 0x006600FF
-#define FILL_BLACK 0x000000FF
+#define FILL_RED    0x990000FF
+#define FILL_GREEN  0x006600FF
+#define FILL_ORANGE 0xDD7500FF
+#define FILL_BLACK  0x000000FF
 
 #define KEY_LT 65361
 #define KEY_UP 65362
@@ -143,6 +144,7 @@ struct element_layout telemetry_elements[] = {
 
 struct element_layout indicator_elements[] = {
 	{"I_RX",       0,   0, 110},
+	{"I_DG",       0,   0, 110},
 	{"I_TX",       0, 250, 340},
 	{NULL,         0,   0,   0}
 };
@@ -454,6 +456,7 @@ int make_indicators(struct layout *l)
 {
 	make_indicator(l, "I_TX", FILL_RED, 90);
 	make_indicator(l, "I_RX", FILL_GREEN, 110);
+	make_indicator(l, "I_DG", FILL_ORANGE, 110);
 
 	put_widgets(l, indicator_elements);
 
