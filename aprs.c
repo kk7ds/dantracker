@@ -930,6 +930,11 @@ char *get_subst(struct state *state, char *key)
 	} else if (STREQ(key, "date")) {
 		strftime(timestr, sizeof(timestr), "%m/%d/%Y", &tm);
 		value = strdup(timestr);
+	} else if (STREQ(key, "digiq")) {
+		int count = 0, i;
+		for (i = 0; i < 8; i++)
+			count += (state->digi_quality >> i) & 0x01;
+		asprintf(&value, "%02.0f%%", (count / 8.0) * 100.0);
 	} else
 		printf("Unknown substitution `%s'", key);
 
