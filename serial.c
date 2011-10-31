@@ -45,7 +45,7 @@ int get_packet(int fd, char *buf, unsigned int *len)
 
 	packet[pos++] = byte;
 
-	while (1) {
+	while (1 && (pos < sizeof(packet))) {
 		ret = read(fd, &byte, 1);
 		if (ret != 1)
 			continue;
@@ -56,9 +56,10 @@ int get_packet(int fd, char *buf, unsigned int *len)
 
 	alarm(0);
 
+	packet[sizeof(packet)-1] = '\0';
 	ret = fap_kiss_to_tnc2(packet, pos, buf, len, &tnc_id);
 	if (!ret)
-		printf("Failed to convert packet: %s\n", buf);
+		printf("Failed to convert packet: %s\n", packet);
 
 	return ret;
 }
