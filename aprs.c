@@ -89,6 +89,11 @@ struct state {
 
 		char *init_kiss_cmd;
 
+		char *digi_alias;
+		int digi_enabled;
+		int digi_append;
+		int digi_delay;
+
 		struct sockaddr display_to;
 	} conf;
 
@@ -545,12 +550,19 @@ int update_mybeacon_status(struct state *state)
 	return 0;
 }
 
-int should_digi_packet(fap_packet_t *fap)
+int should_digi_packet(struct state *state, fap_packet_t *fap)
 {
-	/* We digi if the first element of the path is "TEMP1-N" */
+	int len;
+
+	if (!state->conf.digi_enabled)
+		return 0;
+
+	len = strlen(state->conf.digi_alias);
+
+	/* We digi if the first element of the path is our digi_alias */
 	return ((fap->path_len > 0) &&
 		fap->path && fap->path[0] &&
-		STRNEQ(fap->path[0], "TEMP1", 5));
+		STRNEQ(fap->path[0], state->conf.digi_alias, len));
 }
 
 int digi_packet(struct state *state, fap_packet_t *fap)
@@ -565,7 +577,9 @@ int digi_packet(struct state *state, fap_packet_t *fap)
 		return 0;
 
 	first_digi_start = strstr(copy_packet, fap->path[0]);
-	first_digi_end = first_digi_start + strlen(fap->path[0]);
+	first_digi_end = first_digi_start + strlen(fap->path[0]) + 1;
+	if (state->conf.digi_append)
+		first_digi_end = strchr(first_digi_end, ':');
 	if (!first_digi_start || (first_digi_end <= first_digi_start)) {
 		printf("DIGI: failed to find first digi `%s' in %s\n",
 		       fap->path[0], copy_packet);
@@ -574,13 +588,16 @@ int digi_packet(struct state *state, fap_packet_t *fap)
 	}
 	*first_digi_start = '\0';
 
-	ret = asprintf(&digi_packet, "%s%s%s",
+	ret = asprintf(&digi_packet, "%s%s*,%s%s",
 		       copy_packet,
 		       state->mycall,
+		       state->conf.digi_append ? state->conf.digi_path : "",
 		       first_digi_end);
 	if (ret < 0)
 		goto out;
 
+	/* txdelay in ms */
+	usleep(state->conf.digi_delay * 1000);
 
 	ret = send_beacon(state->tncfd, digi_packet);
 	_ui_send(state, "I_DG", "1000");
@@ -616,7 +633,7 @@ int handle_incoming_packet(struct state *state)
 		display_packet(state, fap);
 		state->last_packet = fap;
 		_ui_send(state, "I_RX", "1000");
-		if (should_digi_packet(fap))
+		if (should_digi_packet(state, fap))
 			digi_packet(state, fap);
 	}
 
@@ -1531,7 +1548,7 @@ char *process_tnc_cmd(char *cmd)
 
 	*b = '\0';
 
-	printf("TNC command: `%s'\n", ret);
+	//printf("TNC command: `%s'\n", ret);
 
 	return ret;
 }
@@ -1620,6 +1637,13 @@ int parse_ini(char *filename, struct state *state)
 	state->conf.static_crs = iniparser_getdouble(ini,
 						     "static:course",
 						     0.0);
+
+	state->conf.digi_alias = iniparser_getstring(ini, "digi:alias",
+						     "TEMP1-1");
+	state->conf.digi_enabled = iniparser_getint(ini, "digi:enabled", 0);
+	state->conf.digi_append = iniparser_getint(ini, "digi:append_path",
+						    0);
+	state->conf.digi_delay = iniparser_getint(ini, "digi:txdelay", 500);
 
 	tmp = iniparser_getstring(ini, "station:beacon_types", "posit");
 	if (strlen(tmp) != 0) {
