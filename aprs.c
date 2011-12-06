@@ -132,6 +132,9 @@ struct state {
 	time_t last_moving;
 	time_t last_status;
 
+	time_t last_wx;
+	float last_wx_dist;
+
 	int comment_idx;
 	int other_beacon_idx;
 
@@ -198,6 +201,29 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 	char *humid = NULL;
 	char *pres = NULL;
 	char *report = NULL;
+	int update_last_wx = 0;
+	struct posit *mypos = MYPOS(state);
+	float distance;
+	const char *dir;
+
+	if (_fap->latitude && _fap->longitude) {
+		distance = KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
+						   *_fap->longitude,
+						   *_fap->latitude));
+		dir = direction(get_direction(mypos->lon, mypos->lat,
+					      *_fap->longitude,
+					      *_fap->latitude));
+	} else {
+		distance = 999999;
+		dir = "";
+	}
+
+	if (((time(NULL) - state->last_wx) > 1800) ||
+	    (distance <= state->last_wx_dist)) {
+		update_last_wx = 1;
+		state->last_wx = time(NULL);
+		state->last_wx_dist = distance;
+	}
 
 	if (fap->wind_gust && fap->wind_dir && fap->wind_speed)
 		asprintf(&wind, "Wind %s %.0fmph (%.0f gst) ",
@@ -232,6 +258,9 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 
 	_ui_send(state, "AI_COMMENT", report);
 
+	if (update_last_wx)
+		_ui_send(state, "WX_DATA", report);
+
 	/* Comment is used for larger WX report, so report the
 	 * comment (if any) in the smaller course field
 	 */
@@ -241,8 +270,32 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		strncpy(buf, _fap->comment, _fap->comment_len);
 		buf[_fap->comment_len] = 0;
 		_ui_send(state, "AI_COURSE", buf);
-	} else
+		if (update_last_wx)
+			_ui_send(state, "WX_COMMENT", buf);
+	} else {
 		_ui_send(state, "AI_COURSE", "");
+		if (update_last_wx)
+			_ui_send(state, "WX_COMMENT", "");
+	}
+
+	if (update_last_wx) {
+		char *dist = NULL;
+		int ret;
+		char last[32];
+
+		strftime(last, sizeof(last), "%H:%M:%S %m/%d/%Y",
+			 localtime(&state->last_wx));
+
+		ret = asprintf(&dist, "%5.1f mi %s (%s)",
+			       distance, dir,
+			       last);
+		if (ret != -1) {
+			_ui_send(state, "WX_DIST", dist);
+			free(dist);
+		}
+		_ui_send(state, "WX_NAME", OBJNAME(_fap));
+		_ui_send(state, "WX_ICON", "/W");
+	}
 
 	free(report);
 	free(pres);
@@ -637,7 +690,8 @@ int handle_incoming_packet(struct state *state)
 		_ui_send(state, "I_RX", "1000");
 		if (should_digi_packet(state, fap))
 			digi_packet(state, fap);
-	}
+	} else
+		printf("ERROR %i\n", *fap->error_code);
 
 	return 0;
 }

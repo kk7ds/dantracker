@@ -142,6 +142,15 @@ struct element_layout telemetry_elements[] = {
 	{NULL,          0,   0}
 };
 
+struct element_layout weather_elements[] = {
+	{"WX_NAME",    30, 350},
+	{"WX_DIST",   150, 350},
+	{"WX_DATA",    30, 380},
+	{"WX_COMMENT", 30, 410},
+	{"WX_ICON",   600, 350},
+	{NULL,          0,   0},
+};
+
 struct element_layout indicator_elements[] = {
 	{"I_RX",       0,   0, 110},
 	{"I_DG",       0,   0, 110},
@@ -452,6 +461,19 @@ int make_telemetry(struct layout *l)
 	return 0;
 }
 
+int make_weather(struct layout *l)
+{
+	make_text_label(l, "WX_NAME", "", "Monospace 20");
+	make_text_label(l, "WX_DIST", "", "Sans 18");
+	make_text_label(l, "WX_DATA", "", "Sans 18");
+	make_text_label(l, "WX_COMMENT", "", "Sans 18");
+	make_icon(l, "WX_ICON");
+
+	put_widgets(l, weather_elements);
+
+	return 0;
+}
+
 int make_indicators(struct layout *l)
 {
 	make_indicator(l, "I_TX", FILL_RED, 90);
@@ -513,6 +535,7 @@ int make_window(struct layout *l)
 	make_aprs_list(l);
 	make_gps_info(l);
 	make_telemetry(l);
+	make_weather(l);
 
 	l->sep1 = gtk_hseparator_new();
 	gtk_widget_set_size_request(l->sep1, 720, 10);
