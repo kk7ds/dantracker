@@ -34,6 +34,8 @@
 #endif
 
 #define MYPOS(s) (&s->mypos[s->mypos_idx])
+#define OBJNAME(p) ((p)->object_or_item_name ? (p)->object_or_item_name : \
+		    (p)->src_callsign)
 
 #define KEEP_PACKETS 8
 #define KEEP_POSITS  4
@@ -349,15 +351,15 @@ void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 void display_packet(struct state *state, fap_packet_t *fap)
 {
 	char buf[512];
-	static char last_callsign[10] = "";
+	static char last_callsign[32] = "";
 	int isnew = 1;
 
-	if (STREQ(fap->src_callsign, last_callsign))
+	if (STREQ(OBJNAME(fap), last_callsign))
 		isnew = 1;
 
-	_ui_send(state, "AI_CALLSIGN", fap->src_callsign);
-	strncpy(last_callsign, fap->src_callsign, 9);
-	last_callsign[9] = 0;
+	_ui_send(state, "AI_CALLSIGN", OBJNAME(fap));
+	strncpy(last_callsign, OBJNAME(fap), 9);
+	last_callsign[31] = 0;
 
 	display_dist_and_dir(state, fap);
 
@@ -381,7 +383,7 @@ int stored_packet_desc(fap_packet_t *fap, int index,
 	if (fap->latitude && fap->longitude)
 		snprintf(buf, len,
 			 "%i: %-9s <small>%3.0fmi %-2s</small>",
-			 index, fap->src_callsign,
+			 index, OBJNAME(fap),
 			 KPH_TO_MPH(fap_distance(mylon, mylat,
 						 *fap->longitude,
 						 *fap->latitude)),
@@ -390,7 +392,7 @@ int stored_packet_desc(fap_packet_t *fap, int index,
 						 *fap->latitude)));
 	else
 		snprintf(buf, len,
-			 "%i: %-9s", index, fap->src_callsign);
+			 "%i: %-9s", index, OBJNAME(fap));
 
 	return 0;
 }
@@ -448,7 +450,7 @@ int find_packet(struct state *state, fap_packet_t *fap)
 
 	for (i = 0; i < KEEP_PACKETS; i++)
 		if (state->recent[i] &&
-		    STREQ(state->recent[i]->src_callsign, fap->src_callsign))
+		    STREQ(OBJNAME(state->recent[i]), OBJNAME(fap)))
 			return i;
 
 	return -1;
@@ -494,7 +496,7 @@ int store_packet(struct state *state, fap_packet_t *fap)
 	int i;
 
 	if (state->last_packet &&
-	    STREQ(state->last_packet->src_callsign, fap->src_callsign)) {
+	    STREQ(OBJNAME(state->last_packet), OBJNAME(fap))) {
 		/* Received another packet for the latest, merge and bail */
 		merge_packets(fap, state->last_packet);
 		fap_free(state->last_packet);
