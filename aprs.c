@@ -226,12 +226,13 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		state->last_wx_dist = distance > 0 ? distance : 999999;
 	}
 
-	if (fap->wind_gust && fap->wind_dir && fap->wind_speed)
+	if (fap->wind_gust && fap->wind_dir && fap->wind_speed &&
+	    ((*fap->wind_gust > 0) || (*fap->wind_speed > 0)))
 		asprintf(&wind, "Wind %s %.0f/%.0fmph ",
 			 direction(*fap->wind_dir),
 			 MS_TO_MPH(*fap->wind_speed),
 			 MS_TO_MPH(*fap->wind_gust));
-	else if (fap->wind_dir && fap->wind_speed)
+	else if (fap->wind_dir && fap->wind_speed && (*fap->wind_speed > 0))
 		asprintf(&wind, "Wind %s %.0f mph ",
 			 direction(*fap->wind_dir),
 			 MS_TO_MPH(*fap->wind_speed));
@@ -239,13 +240,14 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 	if (fap->temp)
 		asprintf(&temp, "%.0fF ", C_TO_F(*fap->temp));
 
-	if (fap->rain_1h && *fap->rain_24h)
+	if (fap->rain_1h && fap->rain_24h &&
+	    (*fap->rain_1h > 0) && (*fap->rain_24h > 0))
 		asprintf(&rain, "Rain %.2fh%.2fd ",
 			 MM_TO_IN(*fap->rain_1h),
 			 MM_TO_IN(*fap->rain_24h));
-	else if (fap->rain_1h)
+	else if (fap->rain_1h && (*fap->rain_1h > 0))
 		asprintf(&rain, "Rain %.2fh ", MM_TO_IN(*fap->rain_1h));
-	else if (fap->rain_24h)
+	else if (fap->rain_24h && (*fap->rain_24h > 0))
 		asprintf(&rain, "Rain %.2fd ", MM_TO_IN(*fap->rain_24h));
 
 	if (fap->humidity)
