@@ -215,15 +215,18 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 					      *_fap->longitude,
 					      *_fap->latitude));
 	} else {
-		distance = 0;
+		distance = -1;
 		dir = "";
 	}
 
+	/* If the last-retained weather beacon is older than 30 minutes,
+	 * or farther away than the just-received beacon, then replace it
+	 */
 	if (((time(NULL) - state->last_wx) > 1800) ||
-	    (distance <= state->last_wx_dist)) {
+	    ((distance > 0) && (distance <= state->last_wx_dist))) {
 		update_last_wx = 1;
 		state->last_wx = time(NULL);
-		state->last_wx_dist = distance > 0 ? distance : 999999;
+		state->last_wx_dist = distance >= 0 ? distance : 999999;
 	}
 
 	if (fap->wind_gust && fap->wind_dir && fap->wind_speed &&
@@ -289,7 +292,7 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		strftime(last, sizeof(last), "%H:%M %m/%d/%Y",
 			 localtime(&state->last_wx));
 
-		if (distance == 0)
+		if (distance < 0)
 			ret = asprintf(&dist, "(%s)", last);
 		else
 			ret = asprintf(&dist, "%5.1f mi %s (%s)",
