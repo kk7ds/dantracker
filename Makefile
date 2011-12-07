@@ -1,4 +1,4 @@
-CFLAGS = -g -Wall -Ilibfap-1.1/src -Iiniparser/src
+CFLAGS = -g -Wall
 GTK_CFLAGS = `pkg-config --cflags 'gtk+-2.0'`
 GTK_LIBS = `pkg-config --libs 'gtk+-2.0'`
 
@@ -15,16 +15,16 @@ nmea.o: nmea.c nmea.h
 aprs: aprs.c uiclient.o serial.o nmea.o
 	test -d .hg && hg id --id > .revision || true
 	echo $$((`cat .build` + 1)) > .build
-	$(CC) $(CFLAGS) $(APRS_CFLAGS) -lfap -liniparser -o $@ $^ -DBUILD=`cat .build` -DREVISION=\"`cat .revision`\"
+	$(CC) $(CFLAGS) $(APRS_CFLAGS) -o $@ $^ -DBUILD=`cat .build` -DREVISION=\"`cat .revision`\" -lfap -liniparser
 
 ui: ui.c uiclient.o
-	$(CC) $(CFLAGS) $(GTK_CFLAGS) $(GTK_LIBS) $(GLIB_CFLAGS) $(GLIB_LIBS) $^ -o $@
+	$(CC) $(CFLAGS) $(GTK_CFLAGS) $(GLIB_CFLAGS) $^ -o $@ $(GTK_LIBS) $(GLIB_LIBS)
 
 uiclient: uiclient.c ui.h
 	$(CC) $(CFLAGS) -DMAIN $< -o $@
 
 fakegps: fakegps.c
-	$(CC) $(CFLAGS) -lm -o $@ $<
+	$(CC) $(CFLAGS) -lm -o $@ $< -lm
 
 clean:
 	rm -f $(TARGETS) *.o *~
