@@ -16,6 +16,7 @@
 #include <termios.h>
 #include <getopt.h>
 #include <netdb.h>
+#include <ctype.h>
 
 #include <fap.h>
 #include <iniparser.h>
@@ -214,7 +215,7 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 					      *_fap->longitude,
 					      *_fap->latitude));
 	} else {
-		distance = 999999;
+		distance = 0;
 		dir = "";
 	}
 
@@ -222,11 +223,11 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 	    (distance <= state->last_wx_dist)) {
 		update_last_wx = 1;
 		state->last_wx = time(NULL);
-		state->last_wx_dist = distance;
+		state->last_wx_dist = distance > 0 ? distance : 999999;
 	}
 
 	if (fap->wind_gust && fap->wind_dir && fap->wind_speed)
-		asprintf(&wind, "Wind %s %.0fmph (%.0f gst) ",
+		asprintf(&wind, "Wind %s %.0f/%.0fmph ",
 			 direction(*fap->wind_dir),
 			 MS_TO_MPH(*fap->wind_speed),
 			 MS_TO_MPH(*fap->wind_gust));
@@ -239,16 +240,16 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		asprintf(&temp, "%.0fF ", C_TO_F(*fap->temp));
 
 	if (fap->rain_1h && *fap->rain_24h)
-		asprintf(&rain, "Rain %.2f\"h%.2f\"d ",
+		asprintf(&rain, "Rain %.2fh%.2fd ",
 			 MM_TO_IN(*fap->rain_1h),
 			 MM_TO_IN(*fap->rain_24h));
 	else if (fap->rain_1h)
-		asprintf(&rain, "Rain %.2f\"h ", MM_TO_IN(*fap->rain_1h));
+		asprintf(&rain, "Rain %.2fh ", MM_TO_IN(*fap->rain_1h));
 	else if (fap->rain_24h)
-		asprintf(&rain, "Rain %.2f\"d ", MM_TO_IN(*fap->rain_24h));
+		asprintf(&rain, "Rain %.2fd ", MM_TO_IN(*fap->rain_24h));
 
 	if (fap->humidity)
-		asprintf(&humid, "Hum. %2i%% ", *fap->humidity);
+		asprintf(&humid, "%2i%% ", *fap->humidity);
 
 	asprintf(&report, "%s%s%s%s",
 		 wind ? wind : "",
@@ -283,12 +284,15 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		int ret;
 		char last[32];
 
-		strftime(last, sizeof(last), "%H:%M:%S %m/%d/%Y",
+		strftime(last, sizeof(last), "%H:%M %m/%d/%Y",
 			 localtime(&state->last_wx));
 
-		ret = asprintf(&dist, "%5.1f mi %s (%s)",
-			       distance, dir,
-			       last);
+		if (distance == 0)
+			ret = asprintf(&dist, "(%s)", last);
+		else
+			ret = asprintf(&dist, "%5.1f mi %s (%s)",
+				       distance, dir,
+				       last);
 		if (ret != -1) {
 			_ui_send(state, "WX_DIST", dist);
 			free(dist);
@@ -307,8 +311,20 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 
 void display_telemetry(struct state *state, fap_telemetry_t *fap)
 {
-	_ui_send(state, "AI_COURSE", "(Telemetry)");
-	_ui_send(state, "AI_COMMENT", "");
+	char *data = NULL;
+	int ret;
+
+	ret = asprintf(&data, "Telemetry #%03i", fap->seq);
+	_ui_send(state, "AI_COURSE", ret == -1 ? "" : data);
+	free(data);
+
+	ret = asprintf(&data, "%.0f %.0f %.0f %.0f %.0f %s",
+		       fap->val1, fap->val2, fap->val3, fap->val4, fap->val5,
+		       fap->bits);
+	_ui_send(state, "AI_COMMENT", ret == -1 ? "" : data);
+	free(data);
+
+	_ui_send(state, "AI_ICON", "/Q");
 }
 
 void display_phg(struct state *state, fap_packet_t *fap)
@@ -356,6 +372,10 @@ void display_posit(struct state *state, fap_packet_t *fap, int isnew)
 	if (fap->type && (*fap->type == fapSTATUS)) {
 		strncpy(buf, fap->status, fap->status_len);
 		buf[fap->status_len] = 0;
+		_ui_send(state, "AI_COMMENT", buf);
+	} else if (fap->format && (*fap->format == fapPOS_MICE)) {
+		fap_mice_mbits_to_message(fap->messagebits, buf);
+		buf[0] = toupper(buf[0]);
 		_ui_send(state, "AI_COMMENT", buf);
 	} else if (fap->comment_len) {
 		strncpy(buf, fap->comment, fap->comment_len);
@@ -445,7 +465,9 @@ int stored_packet_desc(fap_packet_t *fap, int index,
 						 *fap->latitude)));
 	else
 		snprintf(buf, len,
-			 "%i: %-9s", index, OBJNAME(fap));
+			 "%i: %-9s <small>%s</small>",
+			 index, OBJNAME(fap),
+			 fap->timestamp ? format_time(time(NULL) - *fap->timestamp) : "");
 
 	return 0;
 }
@@ -547,6 +569,9 @@ int merge_packets(fap_packet_t *new, fap_packet_t *old)
 int store_packet(struct state *state, fap_packet_t *fap)
 {
 	int i;
+
+	fap->timestamp = malloc(sizeof(*fap->timestamp));
+	time(fap->timestamp);
 
 	if (state->last_packet &&
 	    STREQ(OBJNAME(state->last_packet), OBJNAME(fap))) {
@@ -1848,6 +1873,9 @@ int main(int argc, char **argv)
 				handle_telemetry(&state);
 			if (FD_ISSET(state.dspfd, &fds))
 				handle_display(&state);
+		} else {
+			/* Work to do if no other events */
+			update_packets_ui(&state);
 		}
 
 		beacon(&state);
