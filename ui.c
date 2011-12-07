@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <arpa/inet.h>
+#include <getopt.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
@@ -144,7 +145,7 @@ struct element_layout telemetry_elements[] = {
 
 struct element_layout weather_elements[] = {
 	{"WX_NAME",    30, 350},
-	{"WX_DIST",   150, 350},
+	{"WX_DIST",   170, 350},
 	{"WX_DATA",    30, 380},
 	{"WX_COMMENT", 30, 410},
 	{"WX_ICON",   600, 350},
@@ -507,7 +508,7 @@ gboolean main_button(GtkWidget *window, GdkEvent *event, gpointer *data)
 	return FALSE;
 }
 
-int make_window(struct layout *l)
+int make_window(struct layout *l, int justwindow)
 {
 	GdkColor color = {0, 0, 0};
 	GdkCursor *cursor;
@@ -522,7 +523,8 @@ int make_window(struct layout *l)
 
 	gdk_color_parse(BG_COLOR, &color);
 	gtk_widget_modify_bg(l->window, GTK_STATE_NORMAL, &color);
-	gtk_window_maximize(GTK_WINDOW(l->window));
+	if (!justwindow)
+		gtk_window_maximize(GTK_WINDOW(l->window));
 
 	gtk_widget_show(l->window);
 
@@ -703,14 +705,47 @@ int server_loop(struct layout *l)
 	return 0;
 }
 
+struct opts {
+	int window;
+};
+
+int parse_opts(int argc, char **argv, struct opts *opts)
+{
+	static struct option lopts[] = {
+		{"window",    0, 0, 'w'},
+		{NULL,        0, 0,  0 },
+	};
+
+	while (1) {
+		int c;
+		int optidx;
+
+		c = getopt_long(argc, argv, "w", lopts, &optidx);
+		if (c == -1)
+			break;
+
+		switch(c) {
+		case 'w':
+			opts->window = 1;
+			break;
+		}
+	}
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	struct layout layout;
+	struct opts opts;
 
+	memset(&opts, 0, sizeof(opts));
 	memset(&layout, 0, sizeof(layout));
 	layout.state.main_selected = -1;
 
 	gtk_init(&argc, &argv);
+
+	parse_opts(argc, argv, &opts);
 
 	aprs_pri_img = gdk_pixbuf_new_from_file("images/aprs_pri_big.png",
 						NULL);
@@ -721,7 +756,7 @@ int main(int argc, char **argv)
 	layout.nxt = 0;
 	layout.elements = calloc(layout.max, sizeof(struct named_element));
 
-	make_window(&layout);
+	make_window(&layout, opts.window);
 
 	server_loop(&layout);
 
