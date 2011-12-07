@@ -1101,7 +1101,7 @@ char *choose_data(struct state *state, char *req_icon)
 		    (!HAS_BEEN(state->tel.last_tel, 30))) {
 			*req_icon = '_';
 			asprintf(&data,
-				 ".../...t%03.0f%s",
+				 ".../...g...t%03.0f%s",
 				 state->tel.temp1,
 				 comment);
 			break;
