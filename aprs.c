@@ -278,6 +278,14 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		_ui_send(state, "AI_COURSE", buf);
 		if (update_last_wx)
 			_ui_send(state, "WX_COMMENT", buf);
+	} else if (_fap->status_len) {
+		char buf[512];
+
+		strncpy(buf, _fap->status, _fap->status_len);
+		buf[_fap->comment_len] = 0;
+		_ui_send(state, "AI_COURSE", buf);
+		if (update_last_wx)
+			_ui_send(state, "WX_COMMENT", buf);
 	} else {
 		_ui_send(state, "AI_COURSE", "");
 		if (update_last_wx)
@@ -289,7 +297,7 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		int ret;
 		char last[32];
 
-		strftime(last, sizeof(last), "%H:%M %m/%d/%Y",
+		strftime(last, sizeof(last), "%H:%M %m/%d",
 			 localtime(&state->last_wx));
 
 		if (distance < 0)
@@ -323,7 +331,7 @@ void display_telemetry(struct state *state, fap_telemetry_t *fap)
 	_ui_send(state, "AI_COURSE", ret == -1 ? "" : data);
 	free(data);
 
-	ret = asprintf(&data, "%.0f %.0f %.0f %.0f %.0f %s",
+	ret = asprintf(&data, "%.0f %.0f %.0f %.0f %.0f %8.8s",
 		       fap->val1, fap->val2, fap->val3, fap->val4, fap->val5,
 		       fap->bits);
 	_ui_send(state, "AI_COMMENT", ret == -1 ? "" : data);
