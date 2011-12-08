@@ -29,6 +29,9 @@
 GdkPixbuf *aprs_pri_img;
 GdkPixbuf *aprs_sec_img;
 
+#define MAX_WIDTH 720
+#define PAD_X 30
+
 enum {
 	TYPE_TEXT_LABEL,
 	TYPE_IMAGE,
@@ -41,6 +44,7 @@ struct named_element {
 	unsigned int type;
 	GtkWidget *widget;
 	int (*update_fn)(struct named_element *e, const char *value);
+	void *data;
 };
 
 struct key_map;
@@ -71,8 +75,8 @@ struct element_layout {
 	const char *name;
 	int x;
 	int y;
-	int height;
 	int width;
+	int height;
 };
 
 struct key_map {
@@ -106,8 +110,8 @@ struct key_map config_screen[] = {
 struct element_layout aprs_info_elements[] = {
 	{"AI_ICON",     600, 0},
 	{"AI_CALLSIGN", 30,  10},
-	{"AI_COURSE",   30,  50},
-	{"AI_COMMENT",  30,  80},
+	{"AI_COURSE",   30,  50, 560},
+	{"AI_COMMENT",  30,  80, 560},
 	{"AI_DISTANCE", 250, 15},
 	{NULL, 0, 0}
 };
@@ -144,19 +148,19 @@ struct element_layout telemetry_elements[] = {
 };
 
 struct element_layout weather_elements[] = {
-	{"WX_NAME",    30, 350},
-	{"WX_DIST",   170, 350},
-	{"WX_DATA",    30, 380},
-	{"WX_COMMENT", 30, 410},
+	{"WX_NAME",    30, 350, 140},
+	{"WX_DIST",   170, 350, 430},
+	{"WX_DATA",    30, 380, 560},
+	{"WX_COMMENT", 30, 410, 560},
 	{"WX_ICON",   600, 350},
 	{NULL,          0,   0},
 };
 
 struct element_layout indicator_elements[] = {
-	{"I_RX",       0,   0, 110},
-	{"I_DG",       0,   0, 110},
-	{"I_TX",       0, 250, 340},
-	{NULL,         0,   0,   0}
+	{"I_RX",       0,   0, MAX_WIDTH, 110},
+	{"I_DG",       0,   0, MAX_WIDTH, 110},
+	{"I_TX",       0, 250, MAX_WIDTH, 340},
+	{NULL,         0,   0, 0,   0}
 };
 
 struct named_element *get_element(struct layout *l, const char *name)
@@ -240,9 +244,58 @@ int main_init_kiss(struct layout *l, struct key_map *km)
 	return 0;
 }
 
+struct text_update_ctx {
+	char *orig_value;
+	const char *curptr;
+	int scroll_fn_running;
+	struct named_element *e;
+};
+
+int scroll_text_label(void *data)
+{
+	struct text_update_ctx *ctx = data;
+	PangoLayout *layout = gtk_label_get_layout(GTK_LABEL(ctx->e->widget));
+
+	if (pango_layout_is_ellipsized(layout))
+		ctx->curptr += 20;
+	else
+		ctx->curptr = ctx->orig_value;
+
+	if ((ctx->curptr - ctx->orig_value) > strlen(ctx->orig_value))
+		ctx->curptr = ctx->orig_value;
+
+	gtk_label_set_markup(GTK_LABEL(ctx->e->widget), ctx->curptr);
+
+	return TRUE;
+}
+
+void str_rstrip(char *string)
+{
+	char *ptr = string + strlen(string) - 1;
+	while ((*ptr == ' ') && (ptr > string))
+		*ptr = '\0';
+}
+
 int update_text_label(struct named_element *e, const char *value)
 {
-	gtk_label_set_markup(GTK_LABEL(e->widget), value);
+	struct text_update_ctx *ctx = e->data;
+	PangoLayout *layout;
+
+	if (ctx->orig_value && !strcmp(ctx->orig_value, value))
+		return 0;
+
+	free(ctx->orig_value);
+	ctx->orig_value = strdup(value);
+	ctx->curptr = ctx->orig_value;
+
+	gtk_label_set_markup(GTK_LABEL(e->widget), ctx->orig_value);
+	layout = gtk_label_get_layout(GTK_LABEL(e->widget));
+	if (pango_layout_is_ellipsized(layout) &&
+	    !ctx->scroll_fn_running) {
+		printf("Scheduling scroll function for %s\n", e->name);
+		ctx->scroll_fn_running = 1;
+		g_timeout_add(3000, scroll_text_label, ctx);
+	}
 
 	return 0;
 }
@@ -254,6 +307,7 @@ int make_text_label(struct layout *l,
 {
 	struct named_element *e = &l->elements[l->nxt++];
 	GdkColor color;
+	struct text_update_ctx *ctx;
 
 	gdk_color_parse(FG_COLOR_TEXT, &color);
 
@@ -266,6 +320,12 @@ int make_text_label(struct layout *l,
 	e->type = TYPE_TEXT_LABEL;
 	e->widget = gtk_label_new(initial);
 	e->update_fn = update_text_label;
+	e->data = ctx = calloc(sizeof(*ctx), 1);
+
+	ctx->e = e;
+
+	gtk_misc_set_alignment(GTK_MISC(e->widget), 0, 0);
+	gtk_label_set_ellipsize(GTK_LABEL(e->widget), PANGO_ELLIPSIZE_END);
 
 	gtk_widget_show(e->widget);
 
@@ -401,6 +461,10 @@ int put_widgets(struct layout *l, struct element_layout *layouts)
 	for (i = 0; layouts[i].name; i++) {
 		struct element_layout *el = &layouts[i];
 		struct named_element *e = get_element(l, el->name);
+		int width = el->width;
+		if (width == 0)
+			width = MAX_WIDTH - PAD_X - el->x;
+		gtk_widget_set_size_request(e->widget, width, -1);
 		gtk_fixed_put(GTK_FIXED(l->fixed), e->widget, el->x, el->y);
 	}
 
@@ -515,7 +579,7 @@ int make_window(struct layout *l, int justwindow)
 	GdkWindow *window;
 
 	l->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_default_size(GTK_WINDOW(l->window), 720, 482);
+	gtk_window_set_default_size(GTK_WINDOW(l->window), MAX_WIDTH, 482);
 
 	l->fixed = gtk_fixed_new();
 	gtk_container_add(GTK_CONTAINER(l->window), l->fixed);
@@ -649,6 +713,7 @@ gboolean server_handle(GIOChannel *source, GIOCondition cond, gpointer user)
 		goto out;
 	}
 
+	str_rstrip(ui_get_msg_valu(msg));
 	e->update_fn(e, ui_get_msg_valu(msg));
  out:
 	free(msg);
