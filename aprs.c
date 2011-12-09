@@ -134,8 +134,7 @@ struct state {
 	time_t last_moving;
 	time_t last_status;
 
-	time_t last_wx;
-	float last_wx_dist;
+	fap_packet_t *last_wx;
 
 	int comment_idx;
 	int other_beacon_idx;
@@ -194,41 +193,28 @@ char *format_time(time_t t)
 	return str;
 }
 
-void display_wx(struct state *state, fap_packet_t *_fap)
+char *wx_get_rain(fap_packet_t *_fap)
 {
-	fap_wx_report_t *fap = _fap->wx_report;
-	char *wind = NULL;
-	char *temp = NULL;
 	char *rain = NULL;
-	char *humid = NULL;
-	char *pres = NULL;
-	char *report = NULL;
-	int update_last_wx = 0;
-	struct posit *mypos = MYPOS(state);
-	float distance;
-	const char *dir;
+	fap_wx_report_t *fap = _fap->wx_report;
 
-	if (_fap->latitude && _fap->longitude) {
-		distance = KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
-						   *_fap->longitude,
-						   *_fap->latitude));
-		dir = direction(get_direction(mypos->lon, mypos->lat,
-					      *_fap->longitude,
-					      *_fap->latitude));
-	} else {
-		distance = -1;
-		dir = "";
-	}
+	if (fap->rain_1h && fap->rain_24h &&
+	    (*fap->rain_1h > 0) && (*fap->rain_24h > 0))
+		asprintf(&rain, "Rain %.2fh%.2fd ",
+			 MM_TO_IN(*fap->rain_1h),
+			 MM_TO_IN(*fap->rain_24h));
+	else if (fap->rain_1h && (*fap->rain_1h > 0))
+		asprintf(&rain, "Rain %.2fh ", MM_TO_IN(*fap->rain_1h));
+	else if (fap->rain_24h && (*fap->rain_24h > 0))
+		asprintf(&rain, "Rain %.2fd ", MM_TO_IN(*fap->rain_24h));
 
-	/* If the last-retained weather beacon is older than 30 minutes,
-	 * or farther away than the just-received beacon, then replace it
-	 */
-	if (((time(NULL) - state->last_wx) > 1800) ||
-	    ((distance > 0) && (distance <= state->last_wx_dist))) {
-		update_last_wx = 1;
-		state->last_wx = time(NULL);
-		state->last_wx_dist = distance >= 0 ? distance : 999999;
-	}
+	return rain;
+}
+
+char *wx_get_wind(fap_packet_t *_fap)
+{
+	char *wind = NULL;
+	fap_wx_report_t *fap = _fap->wx_report;
 
 	if (fap->wind_gust && fap->wind_dir && fap->wind_speed &&
 	    ((*fap->wind_gust > 0) || (*fap->wind_speed > 0)))
@@ -241,21 +227,38 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 			 direction(*fap->wind_dir),
 			 MS_TO_MPH(*fap->wind_speed));
 
-	if (fap->temp)
-		asprintf(&temp, "%.0fF ", C_TO_F(*fap->temp));
+	return wind;
+}
 
-	if (fap->rain_1h && fap->rain_24h &&
-	    (*fap->rain_1h > 0) && (*fap->rain_24h > 0))
-		asprintf(&rain, "Rain %.2fh%.2fd ",
-			 MM_TO_IN(*fap->rain_1h),
-			 MM_TO_IN(*fap->rain_24h));
-	else if (fap->rain_1h && (*fap->rain_1h > 0))
-		asprintf(&rain, "Rain %.2fh ", MM_TO_IN(*fap->rain_1h));
-	else if (fap->rain_24h && (*fap->rain_24h > 0))
-		asprintf(&rain, "Rain %.2fd ", MM_TO_IN(*fap->rain_24h));
+char *wx_get_humid(fap_packet_t *_fap)
+{
+	char *humid = NULL;
+	fap_wx_report_t *fap = _fap->wx_report;
 
 	if (fap->humidity)
 		asprintf(&humid, "%2i%% ", *fap->humidity);
+
+	return humid;
+}
+
+char *wx_get_temp(fap_packet_t *_fap)
+{
+	char *temp = NULL;
+	fap_wx_report_t *fap = _fap->wx_report;
+
+	if (fap->temp)
+		asprintf(&temp, "%.0fF ", C_TO_F(*fap->temp));
+
+	return temp;
+}
+
+char *wx_get_report(fap_packet_t *fap)
+{
+	char *wind = wx_get_wind(fap);
+	char *temp = wx_get_temp(fap);
+	char *rain = wx_get_rain(fap);
+	char *humid = wx_get_humid(fap);
+	char *report = NULL;
 
 	asprintf(&report, "%s%s%s%s",
 		 wind ? wind : "",
@@ -263,64 +266,144 @@ void display_wx(struct state *state, fap_packet_t *_fap)
 		 rain ? rain : "",
 		 humid ? humid : "");
 
-	_ui_send(state, "AI_COMMENT", report);
+	free(wind);
+	free(rain);
+	free(temp);
+	free(humid);
 
-	if (update_last_wx)
-		_ui_send(state, "WX_DATA", report);
+	return report;
+}
+
+void update_recent_wx(struct state *state)
+{
+	char *dist = NULL;
+	int ret;
+	char last[32];
+	char *report;
+	fap_packet_t *fap = state->last_wx;
+	struct posit *mypos = MYPOS(state);
+	float distance;
+	const char *dir;
+
+	if (!fap) {
+		_ui_send(state, "WX_DATA", "");
+		_ui_send(state, "WX_DIST", "");
+		_ui_send(state, "WX_NAME", "");
+		_ui_send(state, "WX_ICON", "/W");
+		_ui_send(state, "WX_COMMENT", "No weather received yet");
+		return;
+	}
+
+	if (fap->latitude && fap->longitude) {
+		distance = KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
+						   *fap->longitude,
+						   *fap->latitude));
+		dir = direction(get_direction(mypos->lon, mypos->lat,
+					      *fap->longitude,
+					      *fap->latitude));
+	} else
+		distance = -1;
+
+	report = wx_get_report(fap);
+
+	_ui_send(state, "WX_DATA", report);
+
+	strftime(last, sizeof(last), "%H:%M %m/%d",
+		 localtime(fap->timestamp));
+
+	if (distance < 0)
+		ret = asprintf(&dist, "(%s)", last);
+	else
+		ret = asprintf(&dist, "%5.1f mi %s (%s)",
+			       distance, dir,
+			       last);
+	if (ret != -1) {
+		_ui_send(state, "WX_DIST", dist);
+			free(dist);
+	}
+	_ui_send(state, "WX_NAME", OBJNAME(fap));
+	_ui_send(state, "WX_ICON", "/W");
+
+	if (fap->comment_len) {
+		char buf[512];
+
+		strncpy(buf, fap->comment, fap->comment_len);
+		buf[fap->comment_len] = 0;
+		_ui_send(state, "WX_COMMENT", buf);
+	} else if (fap->status_len) {
+		char buf[512];
+
+		strncpy(buf, fap->status, fap->status_len);
+		buf[fap->comment_len] = 0;
+		_ui_send(state, "WX_COMMENT", buf);
+	} else {
+		_ui_send(state, "WX_COMMENT", "");
+	}
+
+	free(report);
+}
+
+void display_wx(struct state *state, fap_packet_t *fap)
+{
+	struct posit *mypos = MYPOS(state);
+	float distance = -1, last_distance = -1;
+	char *report;
+
+	if (fap->latitude && fap->longitude)
+		distance = KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
+						   *fap->longitude,
+						   *fap->latitude));
+
+	if (state->last_wx &&
+	    state->last_wx->latitude && state->last_wx->longitude)
+		last_distance = \
+			KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
+						*state->last_wx->longitude,
+						*state->last_wx->latitude));
+	else
+		last_distance = 9999999.0; /* Very far away, if unknown */
+
+	/* If the last-retained weather beacon is older than 30 minutes,
+	 * or farther away than the just-received beacon, then replace it
+	 */
+	if (!state->last_wx ||
+	    ((time(NULL) - *state->last_wx->timestamp) > 1800) ||
+	    ((distance > 0) && (distance <= last_distance))) {
+		printf("Choosing weather dist %.1f <= %.1f, delta %lu sec\n",
+		       distance,
+		       last_distance,
+		       state->last_wx ? time(NULL) - *state->last_wx->timestamp : 0);
+		fap_free(state->last_wx);
+		state->last_wx = fap_parseaprs(fap->orig_packet,
+					       strlen(fap->orig_packet), 1);
+		state->last_wx->timestamp = malloc(sizeof(*fap->timestamp));
+		time(state->last_wx->timestamp);
+		update_recent_wx(state);
+	}
+
+	report = wx_get_report(fap);
+	_ui_send(state, "AI_COMMENT", report);
 
 	/* Comment is used for larger WX report, so report the
 	 * comment (if any) in the smaller course field
 	 */
-	if (_fap->comment_len) {
+	if (fap->comment_len) {
 		char buf[512];
 
-		strncpy(buf, _fap->comment, _fap->comment_len);
-		buf[_fap->comment_len] = 0;
+		strncpy(buf, fap->comment, fap->comment_len);
+		buf[fap->comment_len] = 0;
 		_ui_send(state, "AI_COURSE", buf);
-		if (update_last_wx)
-			_ui_send(state, "WX_COMMENT", buf);
-	} else if (_fap->status_len) {
+	} else if (fap->status_len) {
 		char buf[512];
 
-		strncpy(buf, _fap->status, _fap->status_len);
-		buf[_fap->comment_len] = 0;
+		strncpy(buf, fap->status, fap->status_len);
+		buf[fap->comment_len] = 0;
 		_ui_send(state, "AI_COURSE", buf);
-		if (update_last_wx)
-			_ui_send(state, "WX_COMMENT", buf);
 	} else {
 		_ui_send(state, "AI_COURSE", "");
-		if (update_last_wx)
-			_ui_send(state, "WX_COMMENT", "");
-	}
-
-	if (update_last_wx) {
-		char *dist = NULL;
-		int ret;
-		char last[32];
-
-		strftime(last, sizeof(last), "%H:%M %m/%d",
-			 localtime(&state->last_wx));
-
-		if (distance < 0)
-			ret = asprintf(&dist, "(%s)", last);
-		else
-			ret = asprintf(&dist, "%5.1f mi %s (%s)",
-				       distance, dir,
-				       last);
-		if (ret != -1) {
-			_ui_send(state, "WX_DIST", dist);
-			free(dist);
-		}
-		_ui_send(state, "WX_NAME", OBJNAME(_fap));
-		_ui_send(state, "WX_ICON", "/W");
 	}
 
 	free(report);
-	free(pres);
-	free(humid);
-	free(rain);
-	free(temp);
-	free(wind);
 }
 
 void display_telemetry(struct state *state, fap_telemetry_t *fap)
@@ -508,6 +591,8 @@ int update_packets_ui(struct state *state)
 			sprintf(buf, "%i:", i);
 		_ui_send(state, name, buf);
 	}
+
+	update_recent_wx(state);
 
 	return 0;
 }
