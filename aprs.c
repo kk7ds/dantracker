@@ -123,6 +123,7 @@ struct state {
 	fap_packet_t *last_packet; /* In case we don't store it below */
 	fap_packet_t *recent[KEEP_PACKETS];
 	int recent_idx;
+	int disp_idx;
 
 	char gps_buffer[128];
 	int gps_idx;
@@ -492,7 +493,7 @@ int update_packets_ui(struct state *state)
 	char buf[64];
 	struct posit *mypos = MYPOS(state);
 
-	if (state->last_packet)
+	if (state->last_packet && (state->disp_idx < 0))
 		display_dist_and_dir(state, state->last_packet);
 
 	for (i = KEEP_PACKETS, j = state->recent_idx + 1; i > 0; i--, j++) {
@@ -723,7 +724,8 @@ int handle_incoming_packet(struct state *state)
 			state->digi_quality |= 1;
 			update_mybeacon_status(state);
 		}
-		display_packet(state, fap);
+		if (state->disp_idx < 0) /* No other packet displayed */
+			display_packet(state, fap);
 		state->last_packet = fap;
 		_ui_send(state, "I_RX", "1000");
 		if (should_digi_packet(state, fap))
@@ -933,6 +935,8 @@ int handle_display_showinfo(struct state *state, int index)
 {
 	fap_packet_t *fap;
 	int number = (state->recent_idx + KEEP_PACKETS - index) % KEEP_PACKETS;
+
+	state->disp_idx = index;
 
 	if (index < 0)
 		fap = state->last_packet;
@@ -1851,6 +1855,8 @@ int main(int argc, char **argv)
 		}
 	} else
 		state.telfd = -1;
+
+	state.disp_idx = -1;
 
 	_ui_send(&state, "AI_CALLSIGN", "HELLO");
 
