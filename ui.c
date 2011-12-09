@@ -25,6 +25,9 @@
 #define KEY_RT 65363
 #define KEY_DN 65364
 #define KEY_ENTER 65293
+#define KEY_PGUP 65365
+#define KEY_PGDN 65366
+#define KEY_ESC  65307
 
 GdkPixbuf *aprs_pri_img;
 GdkPixbuf *aprs_sec_img;
@@ -99,6 +102,8 @@ struct key_map main_screen[] = {
 	{'k',  0,         main_init_kiss},
 	{0,    KEY_DN,    main_move_cursor},
 	{0,    KEY_UP,    main_move_cursor},
+	{0,    KEY_PGDN,  main_move_cursor},
+	{0,    KEY_PGUP,  main_move_cursor},
 	{0x00, 0,      NULL}
 };
 
@@ -209,10 +214,10 @@ int main_move_cursor(struct layout *l, struct key_map *km)
 		gtk_widget_modify_fg(e->widget, GTK_STATE_NORMAL, &n_color);
 	}
 
-	if (km->keyval == KEY_DN) {
+	if (km->keyval == KEY_DN || km->keyval == KEY_PGDN) {
 		if (l->state.main_selected < 7)
 			l->state.main_selected++;
-	} else if (km->keyval == KEY_UP) {
+	} else if (km->keyval == KEY_UP || km->keyval == KEY_PGUP) {
 		if (l->state.main_selected > -1)
 			l->state.main_selected--;
 	}
