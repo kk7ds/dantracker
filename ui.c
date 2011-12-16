@@ -58,6 +58,7 @@ struct layout {
 	GtkWidget *sep1;
 	GtkWidget *sep2;
 	GtkWidget *sep3;
+	GtkWidget *sep4;
 
 	GtkWidget *tx;
 	GtkWidget *rx;
@@ -147,8 +148,8 @@ struct element_layout gps_info_elements[] = {
 };
 
 struct element_layout telemetry_elements[] = {
-	{"T_VOLTAGE",  30, 350},
-	{"T_TEMP1",   150, 350},
+	{"T_VOLTAGE",  30, 450},
+	{"T_TEMP1",   150, 450},
 	{NULL,          0,   0}
 };
 
@@ -157,7 +158,7 @@ struct element_layout weather_elements[] = {
 	{"WX_DIST",   170, 350, 430},
 	{"WX_DATA",    30, 380, 560},
 	{"WX_COMMENT", 30, 410, 560},
-	{"WX_ICON",   600, 350},
+	{"WX_ICON",   600, 345},
 	{NULL,          0,   0},
 };
 
@@ -623,6 +624,11 @@ int make_window(struct layout *l, int justwindow)
 	gtk_widget_show(l->sep3);
 	gtk_fixed_put(GTK_FIXED(l->fixed), l->sep3, 0, 340);
 
+	l->sep4 = gtk_hseparator_new();
+	gtk_widget_set_size_request(l->sep4, 720, 10);
+	gtk_widget_show(l->sep4);
+	gtk_fixed_put(GTK_FIXED(l->fixed), l->sep4, 0, 440);
+
 	gtk_widget_add_events(GTK_WIDGET(l->window), GDK_KEY_PRESS_MASK);
 	gtk_signal_connect(GTK_OBJECT(l->window), "key-press-event",
 			   G_CALLBACK(main_button), l);
@@ -757,7 +763,6 @@ int server_loop(struct layout *l)
 {
 	int sock;
 	GIOChannel *channel;
-	guint id;
 
 	if (getenv("INET"))
 		sock = server_setup_inet();
@@ -768,7 +773,7 @@ int server_loop(struct layout *l)
 
 	channel = g_io_channel_unix_new(sock);
 	g_io_channel_set_encoding(channel, NULL, NULL);
-	id = g_io_add_watch_full(channel, 0, G_IO_IN, server_handle_c, l, NULL);
+	g_io_add_watch_full(channel, 0, G_IO_IN, server_handle_c, l, NULL);
 
 	gtk_main();
 
