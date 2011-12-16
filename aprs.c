@@ -25,6 +25,7 @@
 #include "util.h"
 #include "serial.h"
 #include "nmea.h"
+#include "aprs-is.h"
 
 #ifndef BUILD
 #define BUILD 0
@@ -34,7 +35,7 @@
 #define REVISION "Unknown"
 #endif
 
-#define MYPOS(s) (&s->mypos[s->mypos_idx])
+#define MYPOS(s) (&(s)->mypos[(s)->mypos_idx])
 #define OBJNAME(p) ((p)->object_or_item_name ? (p)->object_or_item_name : \
 		    (p)->src_callsign)
 
@@ -61,6 +62,7 @@ struct state {
 		char *tel;
 		int tel_rate;
 
+		char *tnc_type;
 		char *gps_type;
 		int testing;
 		int verbose;
@@ -375,7 +377,7 @@ void display_wx(struct state *state, fap_packet_t *fap)
 		       state->last_wx ? time(NULL) - *state->last_wx->timestamp : 0);
 		fap_free(state->last_wx);
 		state->last_wx = fap_parseaprs(fap->orig_packet,
-					       strlen(fap->orig_packet), 1);
+					       strlen(fap->orig_packet), 0);
 		state->last_wx->timestamp = malloc(sizeof(*fap->timestamp));
 		time(state->last_wx->timestamp);
 		update_recent_wx(state);
@@ -794,15 +796,22 @@ int handle_incoming_packet(struct state *state)
 	unsigned int len = sizeof(packet);
 	fap_packet_t *fap;
 	int ret;
+	int isax25;
 
 	memset(packet, 0, len);
 
-	ret = get_packet(state->tncfd, packet, &len);
+	if (STREQ(state->conf.tnc_type, "KISS")) {
+		isax25 = 1;
+		ret = get_packet(state->tncfd, packet, &len);
+	} else {
+		isax25 = 0;
+		ret = get_packet_text(state->tncfd, packet, &len);
+	}
 	if (!ret)
 		return -1;
 
 	printf("%s\n", packet);
-	fap = fap_parseaprs(packet, len, 1);
+	fap = fap_parseaprs(packet, len, isax25);
 	if (!fap->error_code) {
 		store_packet(state, fap);
 		if (STREQ(fap->src_callsign, state->mycall)) {
@@ -815,8 +824,11 @@ int handle_incoming_packet(struct state *state)
 		_ui_send(state, "I_RX", "1000");
 		if (should_digi_packet(state, fap))
 			digi_packet(state, fap);
-	} else
-		printf("ERROR %i\n", *fap->error_code);
+	} else {
+		char buf[1024];
+		fap_explain_error(*fap->error_code, buf);
+		printf("ERROR %i: %s\n", *fap->error_code, buf);
+	}
 
 	return 0;
 }
@@ -1753,6 +1765,7 @@ int parse_ini(char *filename, struct state *state)
 	if (!state->conf.tnc)
 		state->conf.tnc = iniparser_getstring(ini, "tnc:port", NULL);
 	state->conf.tnc_rate = iniparser_getint(ini, "tnc:rate", 9600);
+	state->conf.tnc_type = iniparser_getstring(ini, "tnc:type", "KISS");
 
 	tmp = iniparser_getstring(ini, "tnc:init_kiss_cmd", "");
 	state->conf.init_kiss_cmd = process_tnc_cmd(tmp);
@@ -1915,11 +1928,20 @@ int main(int argc, char **argv)
 	for (i = 0; i < KEEP_PACKETS; i++)
 		state.recent[i] = NULL;
 
-	state.tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate, 1);
-	if (state.tncfd < 0) {
-		printf("Failed to open TNC: %m\n");
-		exit(1);
-	}
+	if (state.conf.tnc && STREQ(state.conf.tnc_type, "KISS")) {
+		state.tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate, 1);
+		if (state.tncfd < 0) {
+			printf("Failed to open TNC: %m\n");
+			exit(1);
+		}
+	} else if (STREQ(state.conf.tnc_type, "NET")) {
+		state.tncfd = aprsis_connect("oregon.aprs2.net", 14580,
+					     "KK7DS",
+					     MYPOS(&state)->lat,
+					     MYPOS(&state)->lon,
+					     10000);
+	} else
+		state.tncfd = -1;
 
 	handle_display_initkiss(&state);
 
@@ -1951,7 +1973,8 @@ int main(int argc, char **argv)
 
 		FD_ZERO(&fds);
 
-		FD_SET(state.tncfd, &fds);
+		if (state.tncfd > 0)
+			FD_SET(state.tncfd, &fds);
 		if (state.gpsfd > 0)
 			FD_SET(state.gpsfd, &fds);
 		if (state.telfd > 0)

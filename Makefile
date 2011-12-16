@@ -11,8 +11,9 @@ all: $(TARGETS)
 uiclient.o: uiclient.c ui.h
 serial.o: serial.c serial.h
 nmea.o: nmea.c nmea.h
+aprs-is.o: aprs-is.c aprs-is.h
 
-aprs: aprs.c uiclient.o serial.o nmea.o
+aprs: aprs.c uiclient.o serial.o nmea.o aprs-is.o
 	test -d .hg && hg id --id > .revision || true
 	echo $$((`cat .build` + 1)) > .build
 	$(CC) $(CFLAGS) $(APRS_CFLAGS) -o $@ $^ -DBUILD=`cat .build` -DREVISION=\"`cat .revision`\" -lfap -liniparser
