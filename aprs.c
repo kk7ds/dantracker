@@ -280,6 +280,17 @@ char *wx_get_report(fap_packet_t *fap)
 	return report;
 }
 
+void str_subst(char *string, char c, char s)
+{
+	char *ptr;
+
+	if (!string)
+		return;
+
+	while ((ptr = strchr(string, c)))
+		*ptr = s;
+}
+
 void update_recent_wx(struct state *state)
 {
 	char *dist = NULL;
@@ -326,6 +337,11 @@ void update_recent_wx(struct state *state)
 	}
 	_ui_send(state, "WX_NAME", OBJNAME(fap));
 	_ui_send(state, "WX_ICON", "/W");
+
+	str_subst(fap->comment, '\n', ' ');
+	str_subst(fap->comment, '\r', ' ');
+	str_subst(fap->status, '\n', ' ');
+	str_subst(fap->status, '\r', ' ');
 
 	if (fap->comment_len) {
 		char buf[512];
