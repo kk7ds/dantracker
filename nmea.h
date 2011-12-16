@@ -9,7 +9,7 @@ struct posit {
 	double speed;
 	int qual;
 	int sats;
-	int tstamp;
+	time_t tstamp;
 	int dstamp;
 };
 

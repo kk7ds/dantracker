@@ -182,7 +182,11 @@ char *format_time(time_t t)
 {
 	static char str[32];
 
-	if (t > 3600)
+	if (t > (3600 * 24))
+		snprintf(str, sizeof(str), "%lud%luh",
+			 t / (3600 * 24),
+			 t % (3600 * 24));
+	else if (t > 3600)
 		snprintf(str, sizeof(str), "%luh%lum", t / 3600, t % 3600);
 	else if (t > 60)
 		if (t % 60)
@@ -280,7 +284,6 @@ void update_recent_wx(struct state *state)
 {
 	char *dist = NULL;
 	int ret;
-	char last[32];
 	char *report;
 	fap_packet_t *fap = state->last_wx;
 	struct posit *mypos = MYPOS(state);
@@ -310,15 +313,13 @@ void update_recent_wx(struct state *state)
 
 	_ui_send(state, "WX_DATA", report);
 
-	strftime(last, sizeof(last), "%H:%M %m/%d",
-		 localtime(fap->timestamp));
-
 	if (distance < 0)
-		ret = asprintf(&dist, "(%s)", last);
+		ret = asprintf(&dist, "(%s ago)",
+			       format_time(time(NULL) - *fap->timestamp));
 	else
-		ret = asprintf(&dist, "%5.1f mi %s (%s)",
+		ret = asprintf(&dist, "%5.1f mi %s (%s ago)",
 			       distance, dir,
-			       last);
+			       format_time(time(NULL) - *fap->timestamp));
 	if (ret != -1) {
 		_ui_send(state, "WX_DIST", dist);
 			free(dist);
@@ -369,6 +370,7 @@ void display_wx(struct state *state, fap_packet_t *fap)
 	 * or farther away than the just-received beacon, then replace it
 	 */
 	if (!state->last_wx ||
+	    STREQ(OBJNAME(state->last_wx), OBJNAME(fap)) ||
 	    ((time(NULL) - *state->last_wx->timestamp) > 1800) ||
 	    ((distance > 0) && (distance <= last_distance))) {
 		printf("Choosing weather dist %.1f <= %.1f, delta %lu sec\n",
@@ -856,22 +858,19 @@ int parse_gps_string(struct state *state)
 int display_gps_info(struct state *state)
 {
 	char buf[512];
+	char timestr[32];
 	struct posit *mypos = MYPOS(state);
 	const char *status = mypos->qual != 0 ?
 		"Locked" :
 		"<span background='red'>INVALID</span>";
-	int hour, min, sec;
 
-	hour = (mypos->tstamp / 10000) + TZ_OFFSET;
-	min = (mypos->tstamp / 100) % 100;
-	sec = mypos->tstamp % 100;
+	strftime(timestr, sizeof(timestr), "%H:%M:%S",
+		 localtime(&mypos->tstamp));
 
-	if (hour < 0)
-		hour += 24;
-
-	sprintf(buf, "%7.5f %8.5f   Time %02i:%02i:%02i   %s: %2i sats",
-		mypos->lat, mypos->lon,
-		hour, min, sec,
+	sprintf(buf, "%7.5f%c %8.5f%c   %s   %s: %2i sats",
+		fabs(mypos->lat), mypos->lat > 0 ? 'N' : 'S',
+		fabs(mypos->lon), mypos->lon > 0 ? 'E' : 'W',
+		timestr,
 		status,
 		mypos->sats);
 	_ui_send(state, "G_LATLON", buf);
