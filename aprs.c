@@ -144,7 +144,7 @@ struct state {
 	uint8_t digi_quality;
 };
 
-int send_beacon(int fd, char *packet)
+int send_kiss_beacon(int fd, char *packet)
 {
 	char buf[512];
 	int ret;
@@ -158,6 +158,24 @@ int send_beacon(int fd, char *packet)
 		return 1;
 	}
 	return write(fd, buf, len) == len;
+}
+
+int send_net_beacon(int fd, char *packet)
+{
+	int ret = 0;
+
+	ret = write(fd, packet, strlen(packet));
+	ret += write(fd, "\r\n", 2);
+
+	return ret == (strlen(packet) + 2);
+}
+
+int send_beacon(struct state *state, char *packet)
+{
+	if (STREQ(state->conf.tnc_type, "KISS"))
+		return send_kiss_beacon(state->tncfd, packet);
+	else
+		return send_net_beacon(state->tncfd, packet);
 }
 
 int _ui_send(struct state *state, const char *name, const char *value)
@@ -478,7 +496,13 @@ void display_posit(struct state *state, fap_packet_t *fap, int isnew)
 {
 	char buf[512];
 
-	if (fap->speed && fap->course && (*fap->speed > 0.0)) {
+	if (fap->speed && fap->course && (*fap->speed > 0.0) && fap->altitude) {
+		snprintf(buf, sizeof(buf), "%.0f MPH %2s @ %i FT",
+			 KPH_TO_MPH(*fap->speed),
+			 direction(*fap->course),
+			 (int)M_TO_FT(*fap->altitude));
+		_ui_send(state, "AI_COURSE", buf);
+	} else if (fap->speed && fap->course && (*fap->speed > 0.0)) {
 		snprintf(buf, sizeof(buf), "%.0f MPH %2s",
 			 KPH_TO_MPH(*fap->speed),
 			 direction(*fap->course));
@@ -798,7 +822,7 @@ int digi_packet(struct state *state, fap_packet_t *fap)
 	/* txdelay in ms */
 	usleep(state->conf.digi_delay * 1000);
 
-	ret = send_beacon(state->tncfd, digi_packet);
+	ret = send_beacon(state, digi_packet);
 	_ui_send(state, "I_DG", "1000");
 
  out:
@@ -895,9 +919,9 @@ int display_gps_info(struct state *state)
 		sprintf(buf, "%.0f MPH %2s, Alt %.0f ft",
 			KTS_TO_MPH(mypos->speed),
 			direction(mypos->course),
-			mypos->alt);
+			M_TO_FT(mypos->alt));
 	else
-		sprintf(buf, "Stationary, Alt %.0f ft", mypos->alt);
+		sprintf(buf, "Stationary, Alt %.0f ft", M_TO_FT(mypos->alt));
 	_ui_send(state, "G_SPD", buf);
 
 	_ui_send(state, "G_MYCALL", state->mycall);
@@ -1298,6 +1322,10 @@ char *make_mice_beacon(struct state *state)
 	unsigned char spd_crs;
 	unsigned char crs_tud;
 
+	unsigned int atemp;
+	char _altitude[5];
+	char *altitude = &_altitude[0];
+
 	lmin = modf(fabs(mypos->lat), &ldeg) * 60;
 	Lmin = modf(fabs(mypos->lon), &Ldeg) * 60;
 
@@ -1333,8 +1361,20 @@ char *make_mice_beacon(struct state *state)
 	/* Course tens and units of degrees */
 	crs_tud = ((int)mypos->course % 100) + 28;
 
+	/* Altitude, base-91 */
+	atemp = mypos->alt + 10000;
+	altitude[0] = 33 + (atemp / pow(91, 3));
+	atemp = atemp % (int)pow(91, 3);
+	altitude[1] = 33 + (atemp / pow(91, 2));
+	atemp = atemp % (int)pow(91, 2);
+	altitude[2] = 33 + (atemp / 91);
+	altitude[3] = 33 + (atemp % 91);
+	altitude[4] = '\0';
+	if (altitude[0] == 33)
+		altitude = &altitude[1];
+
 	asprintf(&str,
-		 "%s>%c%c%c%c%c%c,%s:`%c%c%c%c%c%c%c%c",
+		 "%s>%c%c%c%c%c%c,%s:`%c%c%c%c%c%c%c%c%s}",
 		 state->mycall,
 		 get_digit(lat, 5) | 0x50,
 		 get_digit(lat, 4) | 0x30,
@@ -1350,7 +1390,8 @@ char *make_mice_beacon(struct state *state)
 		 spd_crs,
 		 crs_tud,
 		 state->conf.icon[1],
-		 state->conf.icon[0]);
+		 state->conf.icon[0],
+		 altitude);
 
 	return str;
 }
@@ -1405,7 +1446,7 @@ char *make_beacon(struct state *state, char *payload)
 		payload = data = choose_data(state, &icon);
 
 	ret = asprintf(&packet,
-		       "%s>APZDMS,%s:!%s%c%s%c%s%s",
+		       "%s>APZDMS,%s:!%s%c%s%c%s/A=%06i%s",
 		       state->mycall,
 		       state->conf.digi_path,
 		       _lat,
@@ -1413,6 +1454,7 @@ char *make_beacon(struct state *state, char *payload)
 		       _lon,
 		       icon,
 		       course_speed,
+		       (int)M_TO_FT(mypos->alt),
 		       payload);
 
 	free(data);
@@ -1558,19 +1600,19 @@ int beacon(struct state *state)
 	if (MYPOS(state)->speed > 5) {
 		/* Send a short MIC-E position beacon */
 		packet = make_mice_beacon(state);
-		send_beacon(state->tncfd, packet);
+		send_beacon(state, packet);
 		free(packet);
 
 		if (HAS_BEEN(state->last_status, 120)) {
 			/* Follow up with a status packet */
 			packet = make_status_beacon(state);
-			send_beacon(state->tncfd, packet);
+			send_beacon(state, packet);
 			free(packet);
 			state->last_status = time(NULL);
 		}
 	} else {
 		packet = make_beacon(state, NULL);
-		send_beacon(state->tncfd, packet);
+		send_beacon(state, packet);
 		free(packet);
 	}
 
@@ -1951,7 +1993,7 @@ int main(int argc, char **argv)
 		}
 	} else if (STREQ(state.conf.tnc_type, "NET")) {
 		state.tncfd = aprsis_connect("oregon.aprs2.net", 14580,
-					     "KK7DS",
+					     state.mycall,
 					     MYPOS(&state)->lat,
 					     MYPOS(&state)->lon,
 					     10000);
