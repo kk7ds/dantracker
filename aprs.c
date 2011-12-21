@@ -400,10 +400,13 @@ void display_wx(struct state *state, fap_packet_t *fap)
 	else
 		last_distance = 9999999.0; /* Very far away, if unknown */
 
-	/* If the last-retained weather beacon is older than 30 minutes,
-	 * or farther away than the just-received beacon, then replace it
+	/* If the last-retained weather beacon is older than 30
+	 * minutes, farther away than the just-received beacon, or the
+	 * same as the just-received beacon, then replace it. Oh, but not if
+	 * it's OUR weather beacon.
 	 */
-	if (!state->last_wx ||
+	if (!STREQ(OBJNAME(fap), state->mycall) ||
+	    !state->last_wx ||
 	    STREQ(OBJNAME(state->last_wx), OBJNAME(fap)) ||
 	    ((time(NULL) - *state->last_wx->timestamp) > 1800) ||
 	    ((distance > 0) && (distance <= last_distance))) {
