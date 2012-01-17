@@ -15,7 +15,7 @@ static int aprsis_login(int fd, const char *call,
 	char *buf;
 	int ret, len;
 
-	len = asprintf(&buf, "user %s pass 23789 vers Unknown 0.00 filter r/%.0f/%.0f/%.0f\r\n",
+	len = asprintf(&buf, "user %s pass -1 vers Unknown 0.00 filter r/%.0f/%.0f/%.0f\r\n",
 		       call, lat, lon, range);
 	if (len < 0)
 		return -ENOMEM;
