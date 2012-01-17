@@ -1491,6 +1491,13 @@ int should_beacon(struct state *state)
 
 	char *reason = NULL;
 
+	/* If we went from a NW course to a NE course, the change will be large,
+	 * so correct it to the difference instead of assuming we always take
+	 * large right turns
+	*/
+	if (sb_change > 180)
+		sb_change = 360.0 - sb_change;
+
 	/* Time required to have passed in order to beacon,
 	 * 0 if never, -1 if now
 	 */
