@@ -1,0 +1,13 @@
+Dependencies other than GTK:
+
+libfap:
+  http://pakettiradio.net/libfap/
+
+libiniparser:
+  http://ndevilla.free.fr/iniparser/
+
+Build with "make".
+
+Stress-test by using examples/aprstest.ini (modified as appropriate), which
+will attempt to eat the entire APRS-IS world feed without crashing.
+
