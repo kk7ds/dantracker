@@ -1,3 +1,5 @@
+/* Copyright 2012 Dan Smith <dsmith@danplanet.com> */
+
 #ifndef __NMEA_H
 #define __NMEA_H
 

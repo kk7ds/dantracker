@@ -1,3 +1,5 @@
+/* Copyright 2012 Dan Smith <dsmith@danplanet.com> */
+
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>

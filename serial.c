@@ -1,3 +1,5 @@
+/* Copyright 2012 Dan Smith <dsmith@danplanet.com> */
+
 #include <stdio.h>
 #include <unistd.h>
 #include <termios.h>

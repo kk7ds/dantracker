@@ -1,3 +1,5 @@
+/* Copyright 2012 Dan Smith <dsmith@danplanet.com> */
+
 #ifndef __APRS_IS_H
 #define __APRS_IS_H
 

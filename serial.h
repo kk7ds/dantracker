@@ -1,3 +1,5 @@
+/* Copyright 2012 Dan Smith <dsmith@danplanet.com> */
+
 #ifndef __SERIAL_H
 #define __SERIAL_H
 

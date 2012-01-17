@@ -1,3 +1,5 @@
+/* Copyright 2012 Dan Smith <dsmith@danplanet.com> */
+
 #ifndef __UTIL_H
 #define __UTIL_H
 

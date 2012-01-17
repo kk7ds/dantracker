@@ -1,3 +1,5 @@
+/* Copyright 2012 Dan Smith <dsmith@danplanet.com> */
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
