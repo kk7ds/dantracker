@@ -1735,7 +1735,7 @@ int parse_opts(int argc, char **argv, struct state *state)
 		int c;
 		int optidx;
 
-		c = getopt_long(argc, argv, "t:g:T:c:sv",
+		c = getopt_long(argc, argv, "t:g:T:c:svd:",
 				lopts, &optidx);
 		if (c == -1)
 			break;

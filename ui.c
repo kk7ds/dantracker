@@ -761,12 +761,17 @@ gboolean server_handle_c(GIOChannel *source, GIOCondition cond, gpointer user)
 	return TRUE;
 }
 
-int server_loop(struct layout *l)
+struct opts {
+	int window;
+	int inet;
+};
+
+int server_loop(struct opts *opts, struct layout *l)
 {
 	int sock;
 	GIOChannel *channel;
 
-	if (getenv("INET"))
+	if (opts->inet)
 		sock = server_setup_inet();
 	else
 		sock = server_setup_unix();
@@ -782,14 +787,11 @@ int server_loop(struct layout *l)
 	return 0;
 }
 
-struct opts {
-	int window;
-};
-
 int parse_opts(int argc, char **argv, struct opts *opts)
 {
 	static struct option lopts[] = {
 		{"window",    0, 0, 'w'},
+		{"inet",      0, 0, 'i'},
 		{NULL,        0, 0,  0 },
 	};
 
@@ -797,7 +799,7 @@ int parse_opts(int argc, char **argv, struct opts *opts)
 		int c;
 		int optidx;
 
-		c = getopt_long(argc, argv, "w", lopts, &optidx);
+		c = getopt_long(argc, argv, "wi", lopts, &optidx);
 		if (c == -1)
 			break;
 
@@ -805,6 +807,8 @@ int parse_opts(int argc, char **argv, struct opts *opts)
 		case 'w':
 			opts->window = 1;
 			break;
+		case 'i':
+			opts->inet = 1;
 		}
 	}
 
@@ -835,7 +839,7 @@ int main(int argc, char **argv)
 
 	make_window(&layout, opts.window);
 
-	server_loop(&layout);
+	server_loop(&opts, &layout);
 
 	return 0;
 }
