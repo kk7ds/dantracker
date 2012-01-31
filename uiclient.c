@@ -106,10 +106,23 @@ char *ui_get_msg_name(struct ui_msg *msg)
 	return (char*)msg + sizeof(*msg);
 }
 
+void filter_to_ascii(char *string)
+{
+	int i;
+
+	for (i = 0; string[i]; i++) {
+		if ((string[i] < 0x20 || string[i] > 0x7E) &&
+		    (string[i] != '\r' && string[i] != '\n'))
+			string[i] = ' ';
+	}
+}
+
 char *ui_get_msg_valu(struct ui_msg *msg)
 {
 	if (msg->type != MSG_SETVALUE)
 		return NULL;
+
+	filter_to_ascii((char *)msg + sizeof(*msg) + msg->name_value.name_len);
 
 	return (char*)msg + sizeof(*msg) + msg->name_value.name_len;
 }
