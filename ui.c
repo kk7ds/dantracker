@@ -36,6 +36,8 @@ GdkPixbuf *aprs_sec_img;
 
 #define MAX_WIDTH 720
 #define PAD_X 30
+#define MARGIN_X 35
+#define MARGIN_Y  0
 
 enum {
 	TYPE_TEXT_LABEL,
@@ -116,7 +118,7 @@ struct key_map config_screen[] = {
 };
 
 struct element_layout aprs_info_elements[] = {
-	{"AI_ICON",     600, 0},
+	{"AI_ICON",     570, 0},
 	{"AI_CALLSIGN", 30,  10},
 	{"AI_COURSE",   30,  50, 560},
 	{"AI_COMMENT",  30,  80, 560},
@@ -130,10 +132,10 @@ struct element_layout aprs_list_elements[] = {
 	{"AL_02", 30, 180},
 	{"AL_03", 30, 210},
 
-	{"AL_04", 370, 120},
-	{"AL_05", 370, 150},
-	{"AL_06", 370, 180},
-	{"AL_07", 370, 210},
+	{"AL_04", 350, 120},
+	{"AL_05", 350, 150},
+	{"AL_06", 350, 180},
+	{"AL_07", 350, 210},
 	{NULL, 0, 0}
 };
 
@@ -145,7 +147,7 @@ struct element_layout gps_info_elements[] = {
 	{"G_MYCALL",  30, 310},
 	{"G_LASTBEACON",   200, 310},
 	{"G_REASON",       400, 310},
-	{"G_SIGBARS", 640, 310},
+	{"G_SIGBARS", 595, 310},
 	{NULL, 0, 0}
 };
 
@@ -160,7 +162,7 @@ struct element_layout weather_elements[] = {
 	{"WX_DIST",   170, 350, 430},
 	{"WX_DATA",    30, 380, 560},
 	{"WX_COMMENT", 30, 410, 560},
-	{"WX_ICON",   600, 345},
+	{"WX_ICON",   570, 345},
 	{NULL,          0,   0},
 };
 
@@ -473,7 +475,8 @@ int put_widgets(struct layout *l, struct element_layout *layouts)
 		if (width == 0)
 			width = MAX_WIDTH - PAD_X - el->x;
 		gtk_widget_set_size_request(e->widget, width, -1);
-		gtk_fixed_put(GTK_FIXED(l->fixed), e->widget, el->x, el->y);
+		gtk_fixed_put(GTK_FIXED(l->fixed), e->widget,
+			el->x + MARGIN_X, el->y + MARGIN_Y);
 	}
 
 	return 0;
@@ -481,7 +484,7 @@ int put_widgets(struct layout *l, struct element_layout *layouts)
 
 int make_aprs_info(struct layout *l)
 {
-	make_text_label(l, "AI_CALLSIGN", "N0CALL", "Monospace Bold 32");
+	make_text_label(l, "AI_CALLSIGN", "N0CALL", "Sans 30");
 	make_text_label(l, "AI_COURSE",   "", "Sans 22");
 	make_text_label(l, "AI_COMMENT",  "", "Sans 18");
 	make_text_label(l, "AI_DISTANCE", "", "Sans 22");
@@ -838,6 +841,11 @@ int main(int argc, char **argv)
 	layout.elements = calloc(layout.max, sizeof(struct named_element));
 
 	make_window(&layout, opts.window);
+
+	if (layout.nxt == layout.max) {
+		fprintf(stderr, "Too many elements\n");
+		abort();
+	}
 
 	server_loop(&opts, &layout);
 

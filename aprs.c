@@ -601,7 +601,7 @@ int stored_packet_desc(fap_packet_t *fap, int index,
 {
 	if (fap->latitude && fap->longitude)
 		snprintf(buf, len,
-			 "%i: %-9s <small>%3.0fmi %-2s</small>",
+			 "%i:%-9s <small>%3.0fmi %-2s</small>",
 			 index, OBJNAME(fap),
 			 KPH_TO_MPH(fap_distance(mylon, mylat,
 						 *fap->longitude,
@@ -611,7 +611,7 @@ int stored_packet_desc(fap_packet_t *fap, int index,
 						 *fap->latitude)));
 	else
 		snprintf(buf, len,
-			 "%i: %-9s <small>%s</small>",
+			 "%i:%-9s <small>%s</small>",
 			 index, OBJNAME(fap),
 			 fap->timestamp ? format_time(time(NULL) - *fap->timestamp) : "");
 
