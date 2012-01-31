@@ -219,6 +219,25 @@ char *format_time(time_t t)
 	return str;
 }
 
+const char *format_distance_to_posit(struct state *state, fap_packet_t *fap)
+{
+	static char dist[10]; /* STATIC! */
+	struct posit *mypos = MYPOS(state);
+
+	if (fap->latitude && fap->longitude) {
+		float _dist = fap_distance(mypos->lon, mypos->lat,
+					   *fap->longitude,
+					   *fap->latitude);
+		if (_dist < 100.0)
+			snprintf(dist, sizeof(dist), "%5.1fmi", _dist);
+		else
+			snprintf(dist, sizeof(dist), "%4.0fmi", _dist);
+	} else
+		strcpy(dist, "");
+
+	return dist;
+}
+
 char *wx_get_rain(fap_packet_t *_fap)
 {
 	char *rain = NULL;
@@ -348,8 +367,9 @@ void update_recent_wx(struct state *state)
 		ret = asprintf(&dist, "(%s ago)",
 			       format_time(time(NULL) - *fap->timestamp));
 	else
-		ret = asprintf(&dist, "%5.1f mi %s (%s ago)",
-			       distance, dir,
+		ret = asprintf(&dist, "%s %s (%s ago)",
+			       format_distance_to_posit(state, fap),
+			       dir,
 			       format_time(time(NULL) - *fap->timestamp));
 	if (ret != -1) {
 		_ui_send(state, "WX_DIST", dist);
@@ -535,6 +555,7 @@ void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 {
 	char buf[512] = "";
 	char via[32] = "Direct";
+	const char *dist;
 	int i;
 	struct posit *mypos = MYPOS(state);
 
@@ -544,22 +565,20 @@ void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 	if (strchr(via, '*'))
 		*strchr(via, '*') = 0; /* Nuke the asterisk */
 
+	dist = format_distance_to_posit(state, fap);
+
 	if (STREQ(fap->src_callsign, state->mycall))
 		snprintf(buf, sizeof(buf), "via %s", via);
 	else if (fap->latitude && fap->longitude)
-		snprintf(buf, sizeof(buf), "%5.1fmi %2s <small>via %s</small>",
-			 KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
-						 *fap->longitude,
-						 *fap->latitude)),
+		snprintf(buf, sizeof(buf), "%s %2s <small>via %s</small>",
+			 dist,
 			 direction(get_direction(mypos->lon, mypos->lat,
 						 *fap->longitude,
 						 *fap->latitude)),
 			 via);
 	else if (fap->latitude && fap->longitude && fap->altitude)
-		snprintf(buf, 512, "%5.1fmi %2s (%4.0f ft)",
-			 KPH_TO_MPH(fap_distance(mypos->lon, mypos->lat,
-						 *fap->longitude,
-						 *fap->latitude)),
+		snprintf(buf, 512, "%s %2s (%4.0f ft)",
+			 dist,
 			 direction(get_direction(mypos->lon, mypos->lat,
 						 *fap->longitude,
 						 *fap->latitude)),
