@@ -47,4 +47,34 @@ double get_direction(double fLng, double fLat, double tLng, double tLat)
 		return result;
 }
 
+char *get_escaped_string(char *string)
+{
+	int i;
+	char *escaped = NULL;
+	int length = strlen(string) * 2 + 1;
+
+	escaped = malloc(length);
+
+	/* Escape values */
+	for (i = 0; i < strlen(string); i++) {
+		if (strlen(escaped) + 6 >= length) {
+			char *tmp;
+			tmp = realloc(escaped, length * 2);
+			escaped = tmp;
+			length *= 2;
+		}
+
+		if (string[i] == '&')
+			strcat(escaped, "&amp;");
+		else if (string[i] == '<')
+			strcat(escaped, "&lt;");
+		else if (string[i] == '>')
+			strcat(escaped, "&gt;");
+		else
+			strncat(escaped, &string[i], 1);
+	}
+
+	return escaped;
+}
+
 #endif

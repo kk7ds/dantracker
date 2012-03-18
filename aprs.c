@@ -200,6 +200,29 @@ int _ui_send(struct state *state, const char *name, const char *value)
 	return ret;
 }
 
+fap_packet_t *dan_parseaprs(char *string, int len, int isax25)
+{
+	fap_packet_t *fap;
+	char *tmp;
+
+	fap = fap_parseaprs(string, len, isax25);
+	if (fap->error_code)
+		return fap;
+
+	if (fap->comment) {
+		tmp = get_escaped_string(fap->comment);
+		free(fap->comment);
+		fap->comment = tmp;
+	}
+	if (fap->status) {
+		tmp = get_escaped_string(fap->status);
+		free(fap->status);
+		fap->status = tmp;
+	}
+
+	return fap;
+}
+
 char *format_time(time_t t)
 {
 	static char str[32];
@@ -439,7 +462,7 @@ void display_wx(struct state *state, fap_packet_t *fap)
 		       last_distance,
 		       state->last_wx ? time(NULL) - *state->last_wx->timestamp : 0);
 		fap_free(state->last_wx);
-		state->last_wx = fap_parseaprs(fap->orig_packet,
+		state->last_wx = dan_parseaprs(fap->orig_packet,
 					       strlen(fap->orig_packet), 0);
 		state->last_wx->timestamp = malloc(sizeof(*fap->timestamp));
 		time(state->last_wx->timestamp);
@@ -879,7 +902,7 @@ int handle_incoming_packet(struct state *state)
 		return -1;
 
 	printf("%s\n", packet);
-	fap = fap_parseaprs(packet, len, isax25);
+	fap = dan_parseaprs(packet, len, isax25);
 	if (!fap->error_code) {
 		store_packet(state, fap);
 		if (STREQ(fap->src_callsign, state->mycall)) {
