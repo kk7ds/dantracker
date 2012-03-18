@@ -102,6 +102,8 @@ struct state {
 		int digi_delay;
 
 		struct sockaddr display_to;
+
+		unsigned int aprsis_range;
 	} conf;
 
 	struct posit mypos[KEEP_POSITS];
@@ -1743,6 +1745,7 @@ int parse_opts(int argc, char **argv, struct state *state)
 		{"verbose",   0, 0, 'v'},
 		{"conf",      1, 0, 'c'},
 		{"display",   1, 0, 'd'},
+		{"netrange",  1, 0, 'r'},
 		{NULL,        0, 0,  0 },
 	};
 
@@ -1750,11 +1753,13 @@ int parse_opts(int argc, char **argv, struct state *state)
 	strcpy(((struct sockaddr_un *)&state->conf.display_to)->sun_path,
 	       SOCKPATH);
 
+	state->conf.aprsis_range = 100;
+
 	while (1) {
 		int c;
 		int optidx;
 
-		c = getopt_long(argc, argv, "t:g:T:c:svd:",
+		c = getopt_long(argc, argv, "t:g:T:c:svd:r:",
 				lopts, &optidx);
 		if (c == -1)
 			break;
@@ -1780,6 +1785,10 @@ int parse_opts(int argc, char **argv, struct state *state)
 			break;
 		case 'd':
 			lookup_host(state, optarg);
+			break;
+		case 'r':
+			state->conf.aprsis_range = \
+				(unsigned int)strtoul(optarg, NULL, 10);
 			break;
 		case '?':
 			printf("Unknown option\n");
@@ -2016,6 +2025,10 @@ int main(int argc, char **argv)
 	for (i = 0; i < KEEP_PACKETS; i++)
 		state.recent[i] = NULL;
 
+	/* Init our static information before we might login to aprs-is below */
+	if (STREQ(state.conf.gps_type, "static"))
+		fake_gps_data(&state);
+
 	if (state.conf.tnc && STREQ(state.conf.tnc_type, "KISS")) {
 		state.tncfd = serial_open(state.conf.tnc, state.conf.tnc_rate, 1);
 		if (state.tncfd < 0) {
@@ -2027,7 +2040,7 @@ int main(int argc, char **argv)
 					     state.mycall,
 					     MYPOS(&state)->lat,
 					     MYPOS(&state)->lon,
-					     10000);
+					     state.conf.aprsis_range);
 	} else
 		state.tncfd = -1;
 
