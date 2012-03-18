@@ -1758,9 +1758,28 @@ int lookup_host(struct state *state, const char *hostname)
 	return 0;
 }
 
+void usage(char *argv0)
+{
+	printf("Usage:\n"
+	       "%s [OPTS]\n"
+	       "Options:\n"
+	       "  --help, -h       This help message\n"
+	       "  --tnc, -t        Serial port for TNC\n"
+	       "  --gps, -g        Serial port for GPS\n"
+	       "  --telemetry, -T  Serial port for telemetry\n"
+	       "  --testing        Testing mode (faked speed, course, digi)\n"
+	       "  --verbose, -v    Log to stdout\n"
+	       "  --conf, -c       Configuration file to use\n"
+	       "  --display, -d    Host to use for display over INET socket\n"
+	       "  --netrange, -r   Range (miles) to use for APRS-IS filter\n"
+	       "\n",
+	       argv0);
+}
+
 int parse_opts(int argc, char **argv, struct state *state)
 {
 	static struct option lopts[] = {
+		{"help",      0, 0, 'h'},
 		{"tnc",       1, 0, 't'},
 		{"gps",       1, 0, 'g'},
 		{"telemetry", 1, 0, 'T'},
@@ -1782,12 +1801,15 @@ int parse_opts(int argc, char **argv, struct state *state)
 		int c;
 		int optidx;
 
-		c = getopt_long(argc, argv, "t:g:T:c:svd:r:",
+		c = getopt_long(argc, argv, "ht:g:T:c:svd:r:",
 				lopts, &optidx);
 		if (c == -1)
 			break;
 
 		switch(c) {
+		case 'h':
+			usage(argv[0]);
+			exit(1);
 		case 't':
 			state->conf.tnc = optarg;
 			break;
