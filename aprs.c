@@ -576,17 +576,35 @@ void display_posit(struct state *state, fap_packet_t *fap, int isnew)
 		_ui_send(state, "AI_COMMENT", "");
 }
 
+const char *find_heard_via(fap_packet_t *fap)
+{
+	int i;
+	int heard_index = -1;
+	const char *heard_via;
+
+	for (i = 0; i < fap->path_len; i++)
+		if (strchr(fap->path[i], '*'))
+			heard_index = i;
+
+	if (heard_index == -1)
+		return "Direct";
+	heard_via = fap->path[heard_index];
+
+	if ((strstr(heard_via, "WIDE") == heard_via) &&
+	    (heard_index > 0))
+		heard_via = fap->path[heard_index - 1];
+
+	return heard_via;		
+}
+
 void display_dist_and_dir(struct state *state, fap_packet_t *fap)
 {
 	char buf[512] = "";
 	char via[32] = "Direct";
 	const char *dist;
-	int i;
 	struct posit *mypos = MYPOS(state);
 
-	for (i = 0; i < fap->path_len; i++)
-		if (strchr(fap->path[i], '*'))
-			strcpy(via, fap->path[i]);
+	strcpy(via, find_heard_via(fap));
 	if (strchr(via, '*'))
 		*strchr(via, '*') = 0; /* Nuke the asterisk */
 
