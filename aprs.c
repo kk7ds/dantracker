@@ -232,7 +232,7 @@ char *format_time(time_t t)
 			 t / (3600 * 24),
 			 t % (3600 * 24));
 	else if (t > 3600)
-		snprintf(str, sizeof(str), "%luh%lum", t / 3600, t % 3600);
+		snprintf(str, sizeof(str), "%luh%lum", t / 3600, (t % 3600) / 60);
 	else if (t > 60)
 		if (t % 60)
 			snprintf(str, sizeof(str), "%lum%lus", t / 60, t % 60);
