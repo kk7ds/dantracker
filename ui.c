@@ -35,9 +35,12 @@ GdkPixbuf *aprs_pri_img;
 GdkPixbuf *aprs_sec_img;
 
 #define MAX_WIDTH 720
-#define PAD_X 30
-#define MARGIN_X 35
+#define PAD_X 0
+#define MARGIN_X 10
 #define MARGIN_Y  0
+
+#define WX(x) (MARGIN_X+x)
+#define WY(y) (MARGIN_Y+y)
 
 enum {
 	TYPE_TEXT_LABEL,
@@ -118,51 +121,51 @@ struct key_map config_screen[] = {
 };
 
 struct element_layout aprs_info_elements[] = {
-	{"AI_ICON",     570, 0},
-	{"AI_CALLSIGN", 30,  10},
-	{"AI_COURSE",   30,  50, 560},
-	{"AI_COMMENT",  30,  80, 560},
-	{"AI_DISTANCE", 250, 15},
+	{"AI_ICON",     WX(540), WY(0)},
+	{"AI_CALLSIGN", WX(0),  WY(10)},
+	{"AI_COURSE",   WX(0),  WY(50), 560},
+	{"AI_COMMENT",  WX(0),  WY(80), 560},
+	{"AI_DISTANCE", WX(220), WY(15)},
 	{NULL, 0, 0}
 };
 
 struct element_layout aprs_list_elements[] = {
-	{"AL_00", 30, 120},
-	{"AL_01", 30, 150},
-	{"AL_02", 30, 180},
-	{"AL_03", 30, 210},
+	{"AL_00", WX(0), 120},
+	{"AL_01", WX(0), 150},
+	{"AL_02", WX(0), 180},
+	{"AL_03", WX(0), 210},
 
-	{"AL_04", 350, 120},
-	{"AL_05", 350, 150},
-	{"AL_06", 350, 180},
-	{"AL_07", 350, 210},
+	{"AL_04", WX(320), WY(120)},
+	{"AL_05", WX(320), WY(150)},
+	{"AL_06", WX(320), WY(180)},
+	{"AL_07", WX(320), WY(210)},
 	{NULL, 0, 0}
 };
 
 struct element_layout gps_info_elements[] = {
-	{"G_LATLON",  30, 250},
+	{"G_LATLON",		WX(0), WY(250)},
 
-	{"G_SPD",     30, 280},
+	{"G_SPD",		WX(0), WY(280)},
 
-	{"G_MYCALL",  30, 310},
-	{"G_LASTBEACON",   200, 310},
-	{"G_REASON",       400, 310},
-	{"G_SIGBARS", 595, 310},
+	{"G_MYCALL",		WX(0),   WY(310)},
+	{"G_LASTBEACON",	WX(170), WY(310)},
+	{"G_REASON",		WX(370), WY(310)},
+	{"G_SIGBARS",		WX(565), WY(310)},
 	{NULL, 0, 0}
 };
 
 struct element_layout telemetry_elements[] = {
-	{"T_VOLTAGE",  30, 450},
-	{"T_TEMP1",   150, 450},
+	{"T_VOLTAGE",	WX(0),   WY(420)},
+	{"T_TEMP1",	WX(120), WY(420)},
 	{NULL,          0,   0}
 };
 
 struct element_layout weather_elements[] = {
-	{"WX_NAME",    30, 350, 140},
-	{"WX_DIST",   170, 350, 430},
-	{"WX_DATA",    30, 380, 560},
-	{"WX_COMMENT", 30, 410, 560},
-	{"WX_ICON",   570, 345},
+	{"WX_NAME",	WX(0),		WY(350), 140},
+	{"WX_DIST",	WX(140),	WY(350), 430},
+	{"WX_DATA",	WX(0),		WY(380), 560},
+	{"WX_COMMENT",	WX(0),		WY(410), 560},
+	{"WX_ICON",	WX(540),	WY(345)},
 	{NULL,          0,   0},
 };
 
@@ -473,7 +476,7 @@ int put_widgets(struct layout *l, struct element_layout *layouts)
 		struct named_element *e = get_element(l, el->name);
 		int width = el->width;
 		if (width == 0)
-			width = MAX_WIDTH - PAD_X - el->x;
+			width = MAX_WIDTH - MARGIN_X - el->x;
 		gtk_widget_set_size_request(e->widget, width, -1);
 		gtk_fixed_put(GTK_FIXED(l->fixed), e->widget,
 			el->x + MARGIN_X, el->y + MARGIN_Y);
