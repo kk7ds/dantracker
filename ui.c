@@ -751,6 +751,8 @@ gboolean server_handle_c(GIOChannel *source, GIOCondition cond, gpointer user)
 
 	sock = g_io_channel_unix_get_fd(source);
 
+	sa_len = sizeof(sa);
+
 	client = accept(sock, &sa, &sa_len);
 	if (client < 0) {
 		perror("accept");

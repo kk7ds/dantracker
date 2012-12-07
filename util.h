@@ -53,7 +53,7 @@ char *get_escaped_string(char *string)
 	char *escaped = NULL;
 	int length = strlen(string) * 2 + 1;
 
-	escaped = malloc(length);
+	escaped = calloc(length, sizeof(char));
 
 	/* Escape values */
 	for (i = 0; i < strlen(string); i++) {
