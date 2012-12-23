@@ -2055,8 +2055,6 @@ int parse_ini(char *filename, struct state *state)
         return 0;
 }
 
-#ifndef TEST
-#error FOO
 int main(int argc, char **argv)
 {
         int i;
@@ -2180,4 +2178,3 @@ int main(int argc, char **argv)
 
         return 0;
 }
-#endif
