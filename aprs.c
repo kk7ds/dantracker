@@ -1381,7 +1381,8 @@ char *make_mice_beacon(struct state *state)
         double Ldeg, Lmin;
         int lat;
         unsigned char north = mypos->lat > 0 ? 0x50 : 0x30;
-        unsigned char lonsc = fabs(mypos->lon) > 100 ? 0x50 : 0x30;
+        unsigned char lonsc = fabs(mypos->lon) >= 100 ||
+                fabs(mypos->lon) < 10 ? 0x50 : 0x30;
         unsigned char west = mypos->lon > 0 ? 0x30 : 0x50;
 
         unsigned char lon_deg, lon_min, lon_hun;
