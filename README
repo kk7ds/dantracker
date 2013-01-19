@@ -1,12 +1,29 @@
-Dependencies other than GTK:
+Dependencies:
 
 libfap:
   http://pakettiradio.net/libfap/
+  cp libfap-1.3/src/fap.h /usr/local/include/
+  make
+  sudo make install
+  NOTE: libraries install to /usr/local/lib
 
 libiniparser:
   http://ndevilla.free.fr/iniparser/
+  sudo cp iniparser/src/iniparser.h  /usr/local/include
+  make
+  sudo cp iniparser.* /usr/local/lib
 
-Build with "make".
+GTK:
+  gtk+-2.0
+  libgtk2.0-dev
+
+ax25 - optional:
+  libax25-dev
+
+Extra Tools:
+  pkg-config
+
+Build dantracker with "make".
 
 Stress-test by using examples/aprstest.ini (modified as appropriate), which
 will attempt to eat the entire APRS-IS world feed without crashing.
