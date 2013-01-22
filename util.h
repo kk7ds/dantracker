@@ -10,6 +10,7 @@
 #define C_TO_F(c) ((c * 9.0/5.0) + 32)
 #define MM_TO_IN(mm) (mm * 0.0393700787)
 #define KTS_TO_MPH(kts) (kts * 1.15077945)
+#define KTS_TO_KPH(kts) (kts * 1.852)
 
 #define STREQ(x,y) (strcmp(x, y) == 0)
 #define STRNEQ(x,y,n) (strncmp(x, y, n) == 0)

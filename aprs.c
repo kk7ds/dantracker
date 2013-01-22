@@ -105,6 +105,7 @@ struct state {
                 struct sockaddr display_to;
 
                 unsigned int aprsis_range;
+                int metric_units;
         } conf;
 
         struct posit mypos[KEEP_POSITS];
@@ -226,7 +227,7 @@ fap_packet_t *dan_parseaprs(char *string, int len, int isax25)
 
 char *format_time(time_t t)
 {
-        static char str[32];
+        static char str[32]; /* STATIC! */
 
         if (t > (3600 * 24))
                 snprintf(str, sizeof(str), "%lud%luh",
@@ -245,9 +246,75 @@ char *format_time(time_t t)
         return str;
 }
 
+const char *format_temp(struct state *state, const char *format, float celcius)
+{
+        static char str[10];
+        float _temp = state->conf.metric_units ? celcius : C_TO_F(celcius);
+        char  *unit = state->conf.metric_units ? "C" : "F";
+
+	snprintf(str, sizeof(str), format, _temp, unit);
+
+        return str;
+}
+
+const char *format_distance(struct state *state, const char *format, float km)
+{
+        static char str[10];
+        float _dist = state->conf.metric_units ? km : KPH_TO_MPH(km);
+        char  *unit = state->conf.metric_units ? "km" : "mi";
+
+        snprintf(str, sizeof(str), format, _dist, unit);
+
+        return str;
+}
+
+const char *format_speed(struct state *state, const char *format, double kph)
+{
+        static char str[10];
+        float _speed = state->conf.metric_units ? kph : KPH_TO_MPH(kph);
+        char  *unit = state->conf.metric_units ? "km/h" : "MPH";
+
+        snprintf(str, sizeof(str), format, _speed, unit);
+
+        return str;
+}
+
+const char *format_wind_speed(struct state *state, const char *format, double ms)
+{
+        static char str[10];
+        float _speed = state->conf.metric_units ? ms : MS_TO_MPH(ms);
+        char  *unit = state->conf.metric_units ? "m/s" : "MPH";
+
+        snprintf(str, sizeof(str), format, _speed, unit);
+
+        return str;
+}
+
+const char *format_altitude(struct state *state, const char *format, double masl)
+{
+	static char str[25];
+	float _altitude = state->conf.metric_units ? masl : M_TO_FT(masl);
+	char  *unit = state->conf.metric_units ? "masl" : "FT";
+
+	snprintf(str, sizeof(str), format, _altitude, unit);
+
+	return str;
+}
+
+const char *format_altitude_agl(struct state *state, const char *format, double magl)
+{
+        static char str[25];
+        float _altitude = state->conf.metric_units ? magl : M_TO_FT(magl);
+        char  *unit = state->conf.metric_units ? "m" : "FT";
+
+        snprintf(str, sizeof(str), format, _altitude, unit);
+
+        return str;
+}
+
 const char *format_distance_to_posit(struct state *state, fap_packet_t *fap)
 {
-        static char dist[10]; /* STATIC! */
+        const char *dist;
         struct posit *mypos = MYPOS(state);
 
         if (fap->latitude && fap->longitude) {
@@ -255,48 +322,55 @@ const char *format_distance_to_posit(struct state *state, fap_packet_t *fap)
                                            *fap->longitude,
                                            *fap->latitude);
                 if (_dist < 100.0)
-                        snprintf(dist, sizeof(dist), "%5.1fmi", _dist);
+                        dist = format_distance(state, "%5.1f%s", _dist);
                 else
-                        snprintf(dist, sizeof(dist), "%4.0fmi", _dist);
+                        dist = format_distance(state, "%4.0f%s", _dist);
         } else
-                strcpy(dist, "");
+                dist = "";
 
         return dist;
 }
 
-char *wx_get_rain(fap_packet_t *_fap)
+char *wx_get_rain(struct state *state, fap_packet_t *_fap)
 {
         char *rain = NULL;
         fap_wx_report_t *fap = _fap->wx_report;
+	int metric = state->conf.metric_units;
 
         if (fap->rain_1h && fap->rain_24h &&
             (*fap->rain_1h > 0) && (*fap->rain_24h > 0))
                 asprintf(&rain, "Rain %.2fh%.2fd ",
-                         MM_TO_IN(*fap->rain_1h),
-                         MM_TO_IN(*fap->rain_24h));
+                         metric ? *fap->rain_1h  : MM_TO_IN(*fap->rain_1h),
+                         metric ? *fap->rain_24h : MM_TO_IN(*fap->rain_24h));
         else if (fap->rain_1h && (*fap->rain_1h > 0))
-                asprintf(&rain, "Rain %.2fh ", MM_TO_IN(*fap->rain_1h));
+                asprintf(&rain, "Rain %.2fh ",
+                         metric ? *fap->rain_1h : MM_TO_IN(*fap->rain_1h));
         else if (fap->rain_24h && (*fap->rain_24h > 0))
-                asprintf(&rain, "Rain %.2fd ", MM_TO_IN(*fap->rain_24h));
+                asprintf(&rain, "Rain %.2fd ",
+                         metric ? *fap->rain_24h : MM_TO_IN(*fap->rain_24h));
 
         return rain;
 }
 
-char *wx_get_wind(fap_packet_t *_fap)
+char *wx_get_wind(struct state *state, fap_packet_t *_fap)
 {
         char *wind = NULL;
         fap_wx_report_t *fap = _fap->wx_report;
 
+        int metric = state->conf.metric_units;
+
         if (fap->wind_gust && fap->wind_dir && fap->wind_speed &&
             ((*fap->wind_gust > 0) || (*fap->wind_speed > 0)))
-                asprintf(&wind, "Wind %s %.0f/%.0fmph ",
+                asprintf(&wind, "Wind %s %.0f/%.0f%s ",
                          direction(*fap->wind_dir),
-                         MS_TO_MPH(*fap->wind_speed),
-                         MS_TO_MPH(*fap->wind_gust));
+                         metric ? *fap->wind_speed : MS_TO_MPH(*fap->wind_speed),
+                         metric ? *fap->wind_gust  : MS_TO_MPH(*fap->wind_gust),
+                         metric ? "m/s" : "mph");
         else if (fap->wind_dir && fap->wind_speed && (*fap->wind_speed > 0))
-                asprintf(&wind, "Wind %s %.0f mph ",
+                asprintf(&wind, "Wind %s %.0f %s ",
                          direction(*fap->wind_dir),
-                         MS_TO_MPH(*fap->wind_speed));
+                         metric ? *fap->wind_speed : MS_TO_MPH(*fap->wind_speed),
+                         metric ? "m/s" : "mph");
 
         return wind;
 }
@@ -312,22 +386,22 @@ char *wx_get_humid(fap_packet_t *_fap)
         return humid;
 }
 
-char *wx_get_temp(fap_packet_t *_fap)
+char *wx_get_temp(struct state *state, fap_packet_t *_fap)
 {
         char *temp = NULL;
         fap_wx_report_t *fap = _fap->wx_report;
 
         if (fap->temp)
-                asprintf(&temp, "%.0fF ", C_TO_F(*fap->temp));
+                asprintf(&temp, "%s ", format_temp(state, "%.0f%s", *fap->temp));
 
         return temp;
 }
 
-char *wx_get_report(fap_packet_t *fap)
+char *wx_get_report(struct state *state, fap_packet_t *fap)
 {
-        char *wind = wx_get_wind(fap);
-        char *temp = wx_get_temp(fap);
-        char *rain = wx_get_rain(fap);
+        char *wind = wx_get_wind(state, fap);
+        char *temp = wx_get_temp(state, fap);
+        char *rain = wx_get_rain(state, fap);
         char *humid = wx_get_humid(fap);
         char *report = NULL;
 
@@ -385,7 +459,7 @@ void update_recent_wx(struct state *state)
         } else
                 distance = -1;
 
-        report = wx_get_report(fap);
+        report = wx_get_report(state, fap);
 
         _ui_send(state, "WX_DATA", report);
 
@@ -470,7 +544,7 @@ void display_wx(struct state *state, fap_packet_t *fap)
                 update_recent_wx(state);
         }
 
-        report = wx_get_report(fap);
+        report = wx_get_report(state, fap);
         _ui_send(state, "AI_COMMENT", report);
 
         /* Comment is used for larger WX report, so report the
@@ -527,9 +601,9 @@ void display_phg(struct state *state, fap_packet_t *fap)
                 return;
         }
 
-        asprintf(&buf, "Power %iW at %.0fft (%idB gain @ %s)",
+        asprintf(&buf, "Power %iW at %s (%idB gain @ %s)",
                  power*power,
-                 pow(2, height - '0') * 10,
+                 format_altitude_agl(state, "%.0f%s", pow(2, height - '0') * 10),
                  gain,
                  dir ? direction(dir) : "omni");
         _ui_send(state, "AI_COMMENT", buf);
@@ -548,14 +622,14 @@ void display_posit(struct state *state, fap_packet_t *fap, int isnew)
         char buf[512];
 
         if (fap->speed && fap->course && (*fap->speed > 0.0) && fap->altitude) {
-                snprintf(buf, sizeof(buf), "%.0f MPH %2s @ %i FT",
-                         KPH_TO_MPH(*fap->speed),
+                snprintf(buf, sizeof(buf), "%s %2s @ %s",
+                         format_speed(state, "%.0f %s", *fap->speed),
                          direction(*fap->course),
-                         (int)M_TO_FT(*fap->altitude));
+                         format_altitude(state, "%.0f %s", *fap->altitude));
                 _ui_send(state, "AI_COURSE", buf);
         } else if (fap->speed && fap->course && (*fap->speed > 0.0)) {
-                snprintf(buf, sizeof(buf), "%.0f MPH %2s",
-                         KPH_TO_MPH(*fap->speed),
+                snprintf(buf, sizeof(buf), "%s %2s",
+                         format_speed(state, "%.0f %s", *fap->speed),
                          direction(*fap->course));
                 _ui_send(state, "AI_COURSE", buf);
         } else if (isnew)
@@ -658,15 +732,16 @@ void display_packet(struct state *state, fap_packet_t *fap)
         _ui_send(state, "AI_ICON", buf);
 }
 
-int stored_packet_desc(fap_packet_t *fap, int index,
-                       double mylat, double mylon,
+int stored_packet_desc(struct state *state, fap_packet_t *fap,
+                       int index, double mylat, double mylon,
                        char *buf, int len)
 {
         if (fap->latitude && fap->longitude)
                 snprintf(buf, len,
-                         "%i:%-9s <small>%3.0fmi %-2s</small>",
+                         "%i:%-9s <small>%s %-2s</small>",
                          index, OBJNAME(fap),
-                         KPH_TO_MPH(fap_distance(mylon, mylat,
+                         format_distance(state, "%3.0f%s",
+						 fap_distance(mylon, mylat,
                                                  *fap->longitude,
                                                  *fap->latitude)),
                          direction(get_direction(mylon, mylat,
@@ -696,7 +771,7 @@ int update_packets_ui(struct state *state)
 
                 sprintf(name, "AL_%02i", i-1);
                 if (p)
-                        stored_packet_desc(p, i,
+                        stored_packet_desc(state, p, i,
                                            mypos->lat, mypos->lon,
                                            buf, sizeof(buf));
                 else
@@ -984,12 +1059,12 @@ int display_gps_info(struct state *state)
         _ui_send(state, "G_LATLON", buf);
 
         if (mypos->speed > 1.0)
-                sprintf(buf, "%.0f MPH %2s, Alt %.0f ft",
-                        KTS_TO_MPH(mypos->speed),
+                sprintf(buf, "%s %2s, Alt %s",
+                        format_speed(state, "%.0f %s", KTS_TO_KPH(mypos->speed)),
                         direction(mypos->course),
-                        M_TO_FT(mypos->alt));
+                        format_altitude(state, "%.0f %s", mypos->alt));
         else
-                sprintf(buf, "Stationary, Alt %.0f ft", M_TO_FT(mypos->alt));
+                sprintf(buf, "Stationary, Alt %s", format_altitude(state, "%.0f %s", mypos->alt));
         _ui_send(state, "G_SPD", buf);
 
         _ui_send(state, "G_MYCALL", state->mycall);
@@ -1792,6 +1867,7 @@ void usage(char *argv0)
                "  --conf, -c       Configuration file to use\n"
                "  --display, -d    Host to use for display over INET socket\n"
                "  --netrange, -r   Range (miles) to use for APRS-IS filter\n"
+               "  --metric, -m     Display metric units\n"
                "\n",
                argv0);
 }
@@ -1808,6 +1884,7 @@ int parse_opts(int argc, char **argv, struct state *state)
                 {"conf",      1, 0, 'c'},
                 {"display",   1, 0, 'd'},
                 {"netrange",  1, 0, 'r'},
+                {"metric",    0, 0, 'm'},
                 {NULL,        0, 0,  0 },
         };
 
@@ -1821,7 +1898,7 @@ int parse_opts(int argc, char **argv, struct state *state)
                 int c;
                 int optidx;
 
-                c = getopt_long(argc, argv, "ht:g:T:c:svd:r:",
+                c = getopt_long(argc, argv, "ht:g:T:c:svd:r:m",
                                 lopts, &optidx);
                 if (c == -1)
                         break;
@@ -1854,6 +1931,9 @@ int parse_opts(int argc, char **argv, struct state *state)
                 case 'r':
                         state->conf.aprsis_range = \
                                 (unsigned int)strtoul(optarg, NULL, 10);
+                        break;
+                case 'm':
+                        state->conf.metric_units = 1;
                         break;
                 case '?':
                         printf("Unknown option\n");
