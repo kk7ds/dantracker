@@ -252,7 +252,7 @@ const char *format_temp(struct state *state, const char *format, float celcius)
         float _temp = state->conf.metric_units ? celcius : C_TO_F(celcius);
         char  *unit = state->conf.metric_units ? "C" : "F";
 
-	snprintf(str, sizeof(str), format, _temp, unit);
+        snprintf(str, sizeof(str), format, _temp, unit);
 
         return str;
 }
@@ -292,13 +292,13 @@ const char *format_wind_speed(struct state *state, const char *format, double ms
 
 const char *format_altitude(struct state *state, const char *format, double masl)
 {
-	static char str[25];
-	float _altitude = state->conf.metric_units ? masl : M_TO_FT(masl);
-	char  *unit = state->conf.metric_units ? "masl" : "FT";
+        static char str[25];
+        float _altitude = state->conf.metric_units ? masl : M_TO_FT(masl);
+        char  *unit = state->conf.metric_units ? "masl" : "FT";
 
-	snprintf(str, sizeof(str), format, _altitude, unit);
+        snprintf(str, sizeof(str), format, _altitude, unit);
 
-	return str;
+        return str;
 }
 
 const char *format_altitude_agl(struct state *state, const char *format, double magl)
