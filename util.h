@@ -7,6 +7,7 @@
 #define KPH_TO_MPH(km) (km * 0.621371192)
 #define MS_TO_MPH(m) (m * 2.23693629)
 #define M_TO_FT(m) (m * 3.2808399)
+#define FT_TO_M(ft) (ft / 3.2808399)
 #define C_TO_F(c) ((c * 9.0/5.0) + 32)
 #define MM_TO_IN(mm) (mm * 0.0393700787)
 #define KTS_TO_MPH(kts) (kts * 1.15077945)

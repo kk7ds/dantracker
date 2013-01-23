@@ -301,10 +301,10 @@ const char *format_altitude(struct state *state, const char *format, double masl
         return str;
 }
 
-const char *format_altitude_agl(struct state *state, const char *format, double magl)
+const char *format_altitude_agl(struct state *state, const char *format, double ft)
 {
         static char str[25];
-        float _altitude = state->conf.metric_units ? magl : M_TO_FT(magl);
+        float _altitude = state->conf.metric_units ? FT_TO_M(ft) : ft;
         char  *unit = state->conf.metric_units ? "m" : "FT";
 
         snprintf(str, sizeof(str), format, _altitude, unit);
