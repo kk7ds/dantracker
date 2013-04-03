@@ -246,10 +246,10 @@ char *format_time(time_t t)
         return str;
 }
 
-const char *format_temp(struct state *state, const char *format, float celcius)
+const char *format_temp(struct state *state, const char *format, float celsius)
 {
         static char str[10];
-        float _temp = state->conf.metric_units ? celcius : C_TO_F(celcius);
+        float _temp = state->conf.metric_units ? celsius : C_TO_F(celsius);
         char  *unit = state->conf.metric_units ? "C" : "F";
 
         snprintf(str, sizeof(str), format, _temp, unit);
