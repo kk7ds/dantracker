@@ -26,7 +26,7 @@ const char *CARDINALS[] = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
 
 const char *direction(double degrees)
 {
-        return CARDINALS[((int)((degrees + 360 - 22.5) / 45.0)) % 7];
+        return CARDINALS[((int)((degrees + 22.5) / 45.0)) % 8];
 }
 
 double get_direction(double fLng, double fLat, double tLng, double tLat)
